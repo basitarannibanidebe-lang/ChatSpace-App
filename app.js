@@ -536,7 +536,24 @@
     }
 
     if (!data) {
-      toast("Support account not found. Check profile access.");
+      toast("Support profile not visible. Testing username search...");
+
+      const { data: results, error: searchError } = await supabase
+        .from("profiles")
+        .select("id, username")
+        .ilike("username", "%cyber%");
+
+      console.log("Search results:", results);
+      console.log("Search error:", searchError);
+
+      if (searchError) {
+        toast("Profile search error: " + searchError.message);
+      } else if (results?.length) {
+        toast("Found: " + results.map((p) => p.username).join(", "));
+      } else {
+        toast("No profiles visible to this account.");
+      }
+
       return;
     }
 
