@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#10131c" />
+    <title>ChatSpace — Messages that matter</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <main id="authScreen" class="auth-screen">
+      <section class="auth-card">
+        <div class="brand-mark">C</div>
+        <p class="eyebrow">YOUR SPACE TO TALK</p>
+        <h1>Good conversations<br /><span>start here.</span></h1>
+        <p class="muted auth-copy">
+          Message people, send voice notes, and share files in one simple place.
+        </p>
+        <div class="auth-tabs">
+          <button class="tab active" id="loginTab" type="button">Log in</button>
+          <button class="tab" id="signupTab" type="button">
+            Create account
+          </button>
+        </div>
+        <form id="authForm">
+          <label for="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            autocomplete="username"
+            minlength="3"
+            maxlength="24"
+            placeholder="e.g. basit_dev"
+            required
+          />
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="8"
+            placeholder="At least 8 characters"
+            required
+          />
+          <button id="authSubmit" class="primary-btn full" type="submit">
+            Log in
+          </button>
+        </form>
+        <p id="authMessage" class="notice" role="status"></p>
+        <p class="tiny muted">
+          Use a unique password. Do not reuse your email or banking password.
+        </p>
+      </section>
+      <p class="auth-footer">ChatSpace · A little closer, wherever you are.</p>
+    </main>
+
+    <main id="appScreen" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark small">C</div>
+          <span>ChatSpace</span>
+        </div>
+        <div class="sidebar-label">MESSAGES</div>
+        <div class="search-wrap">
+          <span>⌕</span
+          ><input
+            id="userSearch"
+            placeholder="Find username..."
+            aria-label="Find username"
+          />
+        </div>
+        <div id="searchResults" class="search-results"></div>
+        <div class="section-heading">
+          <span>RECENT CHATS</span><span class="live-dot"></span>
+        </div>
+        <div id="chatList" class="chat-list"></div>
+        <div class="sidebar-bottom">
+          <div class="user-avatar" id="myAvatar">?</div>
+          <div class="my-info">
+            <strong id="myUsername">you</strong><span>Account active</span>
+          </div>
+          <button
+            id="logoutBtn"
+            class="icon-btn"
+            title="Log out"
+            aria-label="Log out"
+          >
+            ↪
+          </button>
+        </div>
+      </aside>
+
+      <section class="chat-panel">
+        <header class="chat-header">
+          <div class="chat-person">
+            <div id="peerAvatar" class="user-avatar large">C</div>
+            <div>
+              <h2 id="peerName">Welcome to ChatSpace</h2>
+              <p id="peerStatus">Choose someone to start chatting</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <span class="secure-label">● Private chat</span>
+          </div>
+        </header>
+        <div id="welcomePanel" class="welcome-panel">
+          <div class="welcome-art">
+            <span>✳</span><span>◌</span><span>✦</span>
+          </div>
+          <h2>Your conversations,<br /><span>all in one space.</span></h2>
+          <p>Search for a username on the left, or choose an existing chat.</p>
+        </div>
+        <div id="messages" class="messages hidden" aria-live="polite"></div>
+        <div id="composer" class="composer hidden">
+          <div id="attachmentPreview" class="attachment-preview hidden"></div>
+          <div class="composer-row">
+            <label class="attach-btn" title="Attach a file" for="fileInput"
+              >＋</label
+            >
+            <input
+              id="fileInput"
+              type="file"
+              hidden
+              accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.csv"
+            />
+            <textarea
+              id="messageInput"
+              rows="1"
+              placeholder="Write a message..."
+              aria-label="Write a message"
+            ></textarea>
+            <button
+              id="recordBtn"
+              class="round-btn"
+              title="Record voice note"
+              aria-label="Record voice note"
+            >
+              🎙
+            </button>
+            <button id="sendBtn" class="send-btn" aria-label="Send message">
+              ➤
+            </button>
+          </div>
+          <p class="composer-hint">
+            Enter to send · Shift + Enter for a new line · Attachments up to 10
+            MB
+          </p>
+        </div>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status"></div>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/service-worker.js")
+            .catch((error) => {
+              console.error("Service worker registration failed:", error);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
