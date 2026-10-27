@@ -116,3 +116,42 @@ textarea { resize: none; max-height: 120px; min-height: 39px; flex: 1; padding: 
   }
 }
 
+
+/* ChatSpace support card */
+.support-card {
+  width: min(100%, 360px);
+  margin-top: 25px;
+  padding: 18px;
+  text-align: left;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.support-card h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.support-card p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.support-card a {
+  color: var(--accent2);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.support-card a:hover {
+  text-decoration: underline;
+}
+
+.support-card small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+
