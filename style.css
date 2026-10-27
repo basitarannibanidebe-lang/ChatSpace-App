@@ -106,15 +106,13 @@ textarea { resize: none; max-height: 120px; min-height: 39px; flex: 1; padding: 
   .composer-hint { margin-left: 4px; }
   .welcome-panel { padding: 20px; }
 }
-/* Keep the chat input above the Netlify badge */
-#messageInput,
-#sendBtn {
+
+/* Move the chat composer above the Netlify badge on mobile */
+@media (max-width: 760px) {
+  .chat-panel .composer {
     position: relative;
-    z-index: 1000;
+    z-index: 100;
+    margin-bottom: 65px;
+  }
 }
-/* Hide the Netlify development badge */
-[data-netlify],
-.netlify-badge,
-#netlify-badge {
-    display: none !important;
-}
+
