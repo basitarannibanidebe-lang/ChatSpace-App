@@ -107,14 +107,7 @@ textarea { resize: none; max-height: 120px; min-height: 39px; flex: 1; padding: 
   .welcome-panel { padding: 20px; }
 }
 
-/* Move the chat composer above the Netlify badge on mobile */
-@media (max-width: 760px) {
-  .chat-panel .composer {
-    position: relative;
-    z-index: 100;
-    margin-bottom: 65px;
-  }
-}
+
 
 
 /* ChatSpace support card */
