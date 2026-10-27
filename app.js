@@ -18,7 +18,7 @@
   const usernameEmail = (name) =>
     `${name.toLowerCase()}@users.chatspace.invalid`;
   const cleanUsername = (name) => name.trim().toLowerCase();
-  const validUsername = (name) => /^[a-z0-9_]{3,24}$/.test(name);
+  const validUsername = (name) => /^[a-z0-9_-]{3,24}$/.test(name);
   const escapeHtml = (s) =>
     String(s).replace(
       /[&<>"']/g,
