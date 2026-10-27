@@ -514,28 +514,34 @@
     e.preventDefault();
 
     if (!currentUser) {
-      toast("Please log in first to contact cyber-ace.");
+      toast("Please log in first.");
       return;
     }
 
-    if (currentProfile?.username === SUPPORT_USERNAME) {
-      toast("You're logged in as the support account.");
-      return;
-    }
+    toast("Searching for the support account...");
 
     const { data, error } = await supabase
       .from("profiles")
       .select("id, username")
-      .eq("username", SUPPORT_USERNAME)
+      .ilike("username", "cyber-ace")
       .maybeSingle();
 
+    console.log("Support profile:", data);
+    console.log("Support lookup error:", error);
+
     if (error) {
-      toast("Couldn't find the support account. Please try again.");
+      console.error("Supabase lookup failed:", error);
+      toast("Database error. Check the browser console.");
       return;
     }
 
     if (!data) {
-      toast("The cyber-ace account wasn't found.");
+      toast("Support account not found. Check profile access.");
+      return;
+    }
+
+    if (data.id === currentUser.id) {
+      toast("You're logged in as the support account.");
       return;
     }
 
