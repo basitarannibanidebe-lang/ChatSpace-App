@@ -32,6 +32,8 @@
 ========================================= */
 
 * {
+  padding: none;
+  margin: none;
   box-sizing: border-box;
 }
 
