@@ -99,6 +99,26 @@
         </button>
         <button
           class="nav-btn"
+          data-nav="new"
+          aria-label="New chat"
+          title="New chat"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v8M8 12h8" /></svg
+          ><span>New</span>
+        </button>
+        <button
+          class="nav-btn"
           data-nav="profile"
           aria-label="Profile"
           title="Profile"
@@ -149,12 +169,11 @@
         <div class="search-wrap">
           <span>⌕</span
           ><input
-            id="userSearch"
-            placeholder="Find username..."
-            aria-label="Find username"
+            id="chatFilter"
+            placeholder="Search chats..."
+            aria-label="Search chats"
           />
         </div>
-        <div id="searchResults" class="search-results"></div>
         <div class="section-heading">
           <span>RECENT CHATS</span>
           <span class="live-dot"></span>
@@ -179,19 +198,9 @@
 
         <div id="archivedChatList" class="chat-list hidden"></div>
 
-        <div class="sidebar-bottom">
+        <div class="sidebar-bottom hidden">
           <div class="user-avatar" id="myAvatar">?</div>
-          <div class="my-info">
-            <strong id="myUsername">you</strong><span>Account active</span>
-          </div>
-          <button
-            id="logoutBtn"
-            class="icon-btn"
-            title="Log out"
-            aria-label="Log out"
-          >
-            ↪
-          </button>
+          <strong id="myUsername">you</strong>
         </div>
       </aside>
 
@@ -300,6 +309,16 @@
             ></textarea>
 
             <button
+              id="gifBtn"
+              class="round-btn gif-btn"
+              type="button"
+              title="GIFs and stickers"
+              aria-label="GIFs and stickers"
+            >
+              GIF
+            </button>
+
+            <button
               id="recordBtn"
               class="round-btn"
               title="Record voice note"
@@ -360,6 +379,9 @@
           <button id="saveProfileBtn" class="primary-btn full" type="button">
             Save profile
           </button>
+          <button id="logoutBtn" class="ghost-btn danger full" type="button">
+            Log out
+          </button>
         </div>
       </section>
 
@@ -373,6 +395,16 @@
               ></span
             >
             <input id="receiptsToggle" type="checkbox" checked />
+          </label>
+          <label class="setting-row" for="lastSeenToggle">
+            <span
+              ><strong>Last seen and online status</strong><br /><small
+                class="muted"
+                >Show when you're online. If you turn this off, you won't see
+                other people's either.</small
+              ></span
+            >
+            <input id="lastSeenToggle" type="checkbox" checked />
           </label>
           <h3 class="setting-title">Appearance</h3>
           <div class="seg-row">
@@ -405,6 +437,129 @@
             >
             <input id="notifyToggle" type="checkbox" />
           </label>
+        </div>
+      </section>
+
+      <section id="peerProfilePanel" class="profile-panel hidden">
+        <div class="profile-card">
+          <button id="peerProfileBack" class="ghost-btn" type="button">
+            ← Back to chat
+          </button>
+          <div class="avatar-edit">
+            <div
+              id="peerProfileAvatar"
+              class="user-avatar xl"
+              title="View photo"
+            >
+              ?
+            </div>
+            <div>
+              <h2 id="peerProfileName"></h2>
+              <p class="tiny muted" id="peerProfileUser"></p>
+              <p class="tiny" id="peerProfileStatus"></p>
+            </div>
+          </div>
+          <h3 class="setting-title">About</h3>
+          <p id="peerProfileBio" class="muted"></p>
+          <button id="peerBlockBtn" class="ghost-btn danger full" type="button">
+            Block user
+          </button>
+        </div>
+      </section>
+
+      <section id="newChatPanel" class="profile-panel hidden">
+        <div class="profile-card">
+          <h2>New chat</h2>
+          <div id="ncHome" class="nc-actions">
+            <button id="ncAddSomeone" class="nc-card" type="button">
+              <strong>Add someone</strong
+              ><small class="muted"
+                >Find a person by username and start chatting</small
+              >
+            </button>
+            <button id="ncCreateGroup" class="nc-card" type="button">
+              <strong>Create group</strong
+              ><small class="muted">Chat with several people at once</small>
+            </button>
+          </div>
+          <div id="ncPersonStep" class="hidden">
+            <button class="ghost-btn nc-back" type="button">← Back</button>
+            <div class="search-wrap">
+              <span>⌕</span
+              ><input
+                id="userSearch"
+                placeholder="Find username..."
+                aria-label="Find username"
+              />
+            </div>
+            <div id="searchResults" class="search-results"></div>
+          </div>
+          <div id="ncGroupStep" class="hidden">
+            <button class="ghost-btn nc-back" type="button">← Back</button>
+            <label for="groupNameInput">Group name</label>
+            <input
+              id="groupNameInput"
+              maxlength="50"
+              placeholder="e.g. Weekend plans"
+            />
+            <label for="groupMemberSearch">Add people</label>
+            <div class="search-wrap">
+              <span>⌕</span
+              ><input id="groupMemberSearch" placeholder="Find username..." />
+            </div>
+            <div id="groupMemberResults" class="search-results"></div>
+            <div id="groupChips" class="chips"></div>
+            <button id="createGroupBtn" class="primary-btn full" type="button">
+              Create group
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="groupPanel" class="profile-panel hidden">
+        <div class="profile-card">
+          <button id="groupBack" class="ghost-btn" type="button">
+            ← Back to chat
+          </button>
+          <div class="avatar-edit">
+            <div id="groupAvatar" class="user-avatar xl">?</div>
+            <div>
+              <h2 id="groupTitle"></h2>
+              <p class="tiny muted" id="groupCount"></p>
+            </div>
+          </div>
+          <div id="groupAdminTools" class="hidden group-tools">
+            <label class="ghost-btn" for="groupAvatarInput"
+              >Change group photo</label
+            >
+            <input id="groupAvatarInput" type="file" accept="image/*" hidden />
+            <div class="rename-row">
+              <input
+                id="groupNameEdit"
+                maxlength="50"
+                aria-label="Group name"
+              /><button id="groupRenameBtn" class="ghost-btn" type="button">
+                Rename
+              </button>
+            </div>
+          </div>
+          <h3 class="setting-title">Members</h3>
+          <div id="groupMembers" class="member-list"></div>
+          <div id="groupAddWrap" class="hidden">
+            <h3 class="setting-title">Add people</h3>
+            <div class="search-wrap">
+              <span>⌕</span
+              ><input id="groupAddSearch" placeholder="Find username..." />
+            </div>
+            <div id="groupAddResults" class="search-results"></div>
+          </div>
+          <button
+            id="leaveGroupBtn"
+            class="ghost-btn danger full"
+            type="button"
+          >
+            Leave group
+          </button>
         </div>
       </section>
     </main>

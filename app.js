@@ -68,6 +68,16 @@
           listTimer = setTimeout(loadChats, 400);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "conversation_participants",
+          filter: `user_id=eq.${currentUser.id}`,
+        },
+        () => loadChats(),
+      )
       .subscribe();
   }
   async function markRead() {
@@ -267,14 +277,15 @@
       toast("Couldn't load chats: " + error.message);
       return;
     }
-    // Group chats arrive with Phase 7; for now show one-to-one chats.
+
     const peers = (rows || [])
-      .filter((r) => !r.is_group && r.peer_id)
+      .filter((r) => r.is_group || r.peer_id)
       .map((r) => ({
-        id: r.peer_id,
-        username: r.peer_username,
-        display_name: r.peer_display_name,
-        avatar_url: r.peer_avatar_url,
+        isGroup: Boolean(r.is_group),
+        id: r.is_group ? "group:" + r.conversation_id : r.peer_id,
+        username: r.is_group ? r.group_name : r.peer_username,
+        display_name: r.is_group ? r.group_name : r.peer_display_name,
+        avatar_url: r.is_group ? r.group_avatar_url : r.peer_avatar_url,
         conversationId: r.conversation_id,
         lastMessage: r.last_message,
         lastFromMe: r.last_message_sender === currentUser.id,
@@ -372,7 +383,7 @@
         ? (peer.lastFromMe ? "You: " : "") + peer.lastMessage
         : "Say hello 👋";
       item.innerHTML = `
-        <span class="user-avatar">${avatarInner(peer)}</span>
+        <span class="user-avatar">${avatarInner(peer)}${isOnline(peer.id) ? `<i class="online-dot"></i>` : ""}</span>
 
         <span class="chat-item-details">
           <strong>
@@ -418,19 +429,30 @@
 
   function showChatMenu(peer, anchor) {
     document
-      .querySelectorAll(".chat-context-menu")
-      .forEach((menu) => menu.remove());
+      .querySelectorAll(".chat-context-menu, .chat-menu-backdrop")
+      .forEach((n) => n.remove());
 
     const prefs = peer.preferences || {};
 
     const menu = document.createElement("div");
     menu.className = "chat-context-menu";
 
+    const backdrop = document.createElement("div");
+    backdrop.className = "chat-menu-backdrop";
+    const close = () => {
+      menu.remove();
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = (e) => e.key === "Escape" && close();
+
     const actions = [
       [prefs.is_pinned ? "Unpin chat" : "Pin chat", "pin"],
       [prefs.is_archived ? "Restore chat" : "Archive chat", "archive"],
       [prefs.is_muted ? "Unmute chat" : "Mute chat", "mute"],
-      [blockedIds.has(peer.id) ? "Unblock user" : "Block user", "block"],
+      peer.isGroup
+        ? ["Leave group", "leave"]
+        : [blockedIds.has(peer.id) ? "Unblock user" : "Block user", "block"],
       ["Change wallpaper", "wallpaper"],
       ["Delete chat from my list", "delete"],
     ];
@@ -444,7 +466,8 @@
 
       button.addEventListener("click", async (event) => {
         event.stopPropagation();
-        menu.remove();
+        event.preventDefault();
+        close();
 
         try {
           if (action === "pin") {
@@ -474,6 +497,15 @@
           if (action === "wallpaper") {
             openWallpaperPicker(peer);
             return;
+          }
+
+          if (action === "leave") {
+            if (!window.confirm("Leave this group?")) return;
+            await rpcOrThrow("leave_group", {
+              target_conversation_id: peer.conversationId,
+            });
+            if (activeConversation === peer.conversationId) closeActiveChat();
+            toast("You left the group.");
           }
 
           if (action === "block") {
@@ -541,18 +573,29 @@
       menu.appendChild(button);
     }
 
-    anchor.appendChild(menu);
+    // The menu lives on <body> with a full-screen backdrop, so it can't be
+    // clipped by the chat list, covered by the nav bar, or tap through to
+    // the chat underneath.
+    backdrop.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      close();
+    });
+    document.body.append(backdrop, menu);
+    document.addEventListener("keydown", onKey);
 
-    const closeMenu = (event) => {
-      if (!menu.contains(event.target) && !anchor.contains(event.target)) {
-        menu.remove();
-        document.removeEventListener("click", closeMenu);
-      }
-    };
-
-    setTimeout(() => {
-      document.addEventListener("click", closeMenu);
-    }, 0);
+    if (matchMedia("(max-width: 760px)").matches) {
+      menu.classList.add("sheet");
+    } else {
+      const r = anchor.getBoundingClientRect();
+      const mh = menu.offsetHeight;
+      const mw = menu.offsetWidth;
+      let top = r.bottom + 6;
+      if (top + mh > innerHeight - 10) top = Math.max(10, r.top - mh - 6);
+      const left = Math.min(Math.max(10, r.right - mw), innerWidth - mw - 10);
+      menu.style.top = top + "px";
+      menu.style.left = left + "px";
+    }
   }
 
   let searchTimer;
@@ -588,21 +631,13 @@
   }
 
   async function startConversation(peer) {
-    const { data: existingRows } = await supabase
-      .from("conversation_participants")
-      .select("conversation_id")
-      .eq("user_id", currentUser.id);
-    for (const row of existingRows || []) {
-      const { data: other } = await supabase
-        .from("conversation_participants")
-        .select("user_id")
-        .eq("conversation_id", row.conversation_id)
-        .eq("user_id", peer.id)
-        .maybeSingle();
-      if (other) {
-        await openConversation(peer, row.conversation_id);
-        return;
-      }
+    const { data: chatRows } = await supabase.rpc("get_my_chats");
+    const existing = (chatRows || []).find(
+      (r) => !r.is_group && r.peer_id === peer.id,
+    );
+    if (existing) {
+      await openConversation(peer, existing.conversation_id);
+      return;
     }
     const { data: newId, error } = await supabase.rpc(
       "create_private_conversation",
@@ -619,11 +654,12 @@
   }
 
   async function openConversation(peer, conversationId) {
+    showView("messages");
     activePeer = peer;
     activeConversation = conversationId;
     $("peerName").textContent = peerName(peer);
     setAvatar($("peerAvatar"), peer);
-    $("peerStatus").textContent = "Private conversation";
+    refreshPeerStatus();
     $("welcomePanel").classList.add("hidden");
     $("messages").classList.remove("hidden");
     $("composer").classList.remove("hidden");
@@ -719,6 +755,8 @@
   }
 
   async function loadMessages() {
+    if (activePeer?.isGroup && groupMembersFor !== activeConversation)
+      await loadGroupMembers();
     $("messages").innerHTML = "";
     messageCache.clear();
 
@@ -1044,6 +1082,13 @@
     const row = document.createElement("div");
 
     row.className = "message-row" + (mine ? " mine" : "");
+    // Play the entrance animation once, only for brand-new messages.
+    if (
+      !animatedIds.has(msg.id) &&
+      Math.abs(Date.now() - new Date(msg.created_at)) < 8000
+    )
+      row.classList.add("msg-new");
+    animatedIds.add(msg.id);
     row.dataset.messageId = messageId;
 
     let body = "";
@@ -1153,6 +1198,11 @@
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.innerHTML = body;
+    if (activePeer?.isGroup && !mine)
+      bubble.insertAdjacentHTML(
+        "afterbegin",
+        `<div class="sender-name">${escapeHtml(memberName(msg.sender_id))}</div>`,
+      );
     const reactionBar = document.createElement("div");
     reactionBar.className = "message-reactions";
 
@@ -1162,7 +1212,7 @@
     meta.className = "message-meta";
 
     meta.textContent =
-      `${mine ? "You" : activePeer?.username || "User"} · ` +
+      `${mine ? "You" : activePeer?.isGroup ? memberName(msg.sender_id) : activePeer?.username || "User"} · ` +
       new Date(msg.created_at).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
@@ -1574,6 +1624,674 @@
     }
   });
 
+  // ---- Groups, New chat, chat search ----
+  let groupMembers = [],
+    groupMembersFor = null;
+  const memberName = (id) => {
+    const m = groupMembers.find((x) => x.user_id === id);
+    return m ? peerName(m) : "Member";
+  };
+  async function rpcOrThrow(fn, args) {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) throw error;
+    return data;
+  }
+  async function loadGroupMembers() {
+    const id = activeConversation;
+    const { data } = await supabase.rpc("get_group_members", {
+      target_conversation_id: id,
+    });
+    groupMembers = data || [];
+    groupMembersFor = id;
+    refreshPeerStatus();
+  }
+  function closeActiveChat() {
+    activePeer = null;
+    activeConversation = null;
+    $("messages").innerHTML = "";
+    $("messages").classList.add("hidden");
+    $("composer").classList.add("hidden");
+    $("welcomePanel").classList.remove("hidden");
+    appScreen.classList.remove("chat-open");
+    $("groupPanel").classList.add("hidden");
+    loadChats();
+  }
+
+  // Search chats in the sidebar
+  function applyChatFilter() {
+    const q = $("chatFilter").value.trim().toLowerCase();
+    document
+      .querySelectorAll("#chatList .chat-item, #archivedChatList .chat-item")
+      .forEach((it) =>
+        it.classList.toggle(
+          "hidden",
+          Boolean(q) && !it.textContent.toLowerCase().includes(q),
+        ),
+      );
+  }
+  $("chatFilter").addEventListener("input", applyChatFilter);
+  ["chatList", "archivedChatList"].forEach((id) =>
+    new MutationObserver(applyChatFilter).observe($(id), { childList: true }),
+  );
+
+  // People search used by Create group and Add members
+  async function findPeople(term, excludeIds = []) {
+    const t = cleanUsername(term);
+    if (t.length < 2) return [];
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,username,display_name,avatar_url")
+      .ilike("username", `%${t}%`)
+      .neq("id", currentUser.id)
+      .limit(8);
+    if (error) {
+      toast("User search failed.");
+      return [];
+    }
+    return (data || []).filter((p) => !excludeIds.includes(p.id));
+  }
+  function personButton(p, onClick) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "search-item";
+    b.innerHTML = `<span class="user-avatar">${avatarInner(p)}</span><span><strong>${escapeHtml(peerName(p))}</strong><small class="muted"> @${escapeHtml(p.username)}</small></span>`;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  const debounce = (fn, ms = 300) => {
+    let t;
+    return (...a) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...a), ms);
+    };
+  };
+
+  // New chat panel
+  function ncShow(step) {
+    ["ncHome", "ncPersonStep", "ncGroupStep"].forEach((id) =>
+      $(id).classList.toggle("hidden", id !== step),
+    );
+  }
+  $("ncAddSomeone").addEventListener("click", () => ncShow("ncPersonStep"));
+  $("ncCreateGroup").addEventListener("click", () => ncShow("ncGroupStep"));
+  document
+    .querySelectorAll(".nc-back")
+    .forEach((b) => b.addEventListener("click", () => ncShow("ncHome")));
+
+  const groupSelected = new Map();
+  function renderGroupChips() {
+    const box = $("groupChips");
+    box.innerHTML = "";
+    for (const p of groupSelected.values()) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.textContent = peerName(p) + " ✕";
+      chip.addEventListener("click", () => {
+        groupSelected.delete(p.id);
+        renderGroupChips();
+      });
+      box.appendChild(chip);
+    }
+  }
+  $("groupMemberSearch").addEventListener(
+    "input",
+    debounce(async () => {
+      const box = $("groupMemberResults");
+      box.innerHTML = "";
+      for (const p of await findPeople($("groupMemberSearch").value, [
+        ...groupSelected.keys(),
+      ])) {
+        box.appendChild(
+          personButton(p, () => {
+            groupSelected.set(p.id, p);
+            renderGroupChips();
+            box.innerHTML = "";
+            $("groupMemberSearch").value = "";
+          }),
+        );
+      }
+    }),
+  );
+  $("createGroupBtn").addEventListener("click", async () => {
+    const name = $("groupNameInput").value.trim();
+    if (!name) return toast("Give your group a name.");
+    if (!groupSelected.size) return toast("Add at least one person.");
+    try {
+      const id = await rpcOrThrow("create_group", {
+        group_name: name,
+        member_ids: [...groupSelected.keys()],
+      });
+      groupSelected.clear();
+      renderGroupChips();
+      $("groupNameInput").value = "";
+      await loadChats();
+      const group = lastPeers.find((p) => p.conversationId === id);
+      if (group) await openConversation(group, id);
+    } catch (err) {
+      toast("Couldn't create group: " + err.message);
+    }
+  });
+
+  // Group info panel
+  const myGroupRole = () =>
+    groupMembers.find((m) => m.user_id === currentUser.id)?.role;
+  async function openGroupPanel() {
+    await loadGroupMembers();
+    renderGroupPanel();
+    $("groupPanel").classList.remove("hidden");
+  }
+  function renderGroupPanel() {
+    const role = myGroupRole();
+    const isAdmin = role === "owner" || role === "admin";
+    setAvatar($("groupAvatar"), activePeer);
+    $("groupTitle").textContent = peerName(activePeer);
+    $("groupCount").textContent = groupMembers.length + " members";
+    $("groupNameEdit").value = peerName(activePeer);
+    $("groupAdminTools").classList.toggle("hidden", !isAdmin);
+    $("groupAddWrap").classList.toggle("hidden", !isAdmin);
+    const list = $("groupMembers");
+    list.innerHTML = "";
+    for (const m of groupMembers) {
+      const you = m.user_id === currentUser.id;
+      const row = document.createElement("div");
+      row.className = "member-row";
+      row.innerHTML = `<span class="user-avatar">${avatarInner(m)}</span><span class="member-name"><strong>${escapeHtml(peerName(m))}${you ? " (you)" : ""}</strong><small class="muted">@${escapeHtml(m.username)}</small></span>${m.role !== "member" ? `<span class="role-badge">${m.role}</span>` : ""}`;
+      const actions = document.createElement("span");
+      actions.className = "member-actions";
+      const addAction = (label, fn) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "mini-btn";
+        b.textContent = label;
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await fn();
+            await loadGroupMembers();
+            renderGroupPanel();
+          } catch (err) {
+            toast(err.message);
+          }
+        });
+        actions.appendChild(b);
+      };
+      const args = {
+        target_conversation_id: activeConversation,
+        member_id: m.user_id,
+      };
+      if (!you && role === "owner" && m.role !== "owner")
+        addAction(m.role === "admin" ? "Remove admin" : "Make admin", () =>
+          rpcOrThrow("set_group_member_role", {
+            ...args,
+            new_role: m.role === "admin" ? "member" : "admin",
+          }),
+        );
+      if (
+        !you &&
+        ((role === "owner" && m.role !== "owner") ||
+          (role === "admin" && m.role === "member"))
+      )
+        addAction("Remove", () => rpcOrThrow("remove_group_member", args));
+      row.appendChild(actions);
+      if (!you)
+        row.addEventListener("click", () =>
+          openPeerProfile({ id: m.user_id, ...m }),
+        );
+      list.appendChild(row);
+    }
+  }
+  $("groupBack").addEventListener("click", () =>
+    $("groupPanel").classList.add("hidden"),
+  );
+  $("groupRenameBtn").addEventListener("click", async () => {
+    const name = $("groupNameEdit").value.trim();
+    if (!name) return toast("Group name can't be empty.");
+    try {
+      await rpcOrThrow("update_group", {
+        target_conversation_id: activeConversation,
+        new_name: name,
+      });
+      activePeer.display_name = activePeer.username = name;
+      $("peerName").textContent = name;
+      renderGroupPanel();
+      loadChats();
+      toast("Group renamed.");
+    } catch (err) {
+      toast("Couldn't rename: " + err.message);
+    }
+  });
+  $("groupAvatarInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > 2 * 1024 * 1024)
+      return toast("Choose an image under 2 MB.");
+    const ext = (file.name.split(".").pop() || "jpg")
+      .replace(/[^a-z0-9]/gi, "")
+      .toLowerCase();
+    const path = `${currentUser.id}/group-${activeConversation}-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { contentType: file.type });
+    if (upErr) return toast("Upload failed: " + upErr.message);
+    const url = supabase.storage.from("avatars").getPublicUrl(path)
+      .data.publicUrl;
+    try {
+      await rpcOrThrow("update_group", {
+        target_conversation_id: activeConversation,
+        new_avatar_url: url,
+      });
+      activePeer.avatar_url = url;
+      setAvatar($("peerAvatar"), activePeer);
+      renderGroupPanel();
+      loadChats();
+    } catch (err) {
+      toast("Couldn't save photo: " + err.message);
+    }
+  });
+  $("groupAddSearch").addEventListener(
+    "input",
+    debounce(async () => {
+      const box = $("groupAddResults");
+      box.innerHTML = "";
+      for (const p of await findPeople(
+        $("groupAddSearch").value,
+        groupMembers.map((m) => m.user_id),
+      )) {
+        box.appendChild(
+          personButton(p, async () => {
+            try {
+              await rpcOrThrow("add_group_members", {
+                target_conversation_id: activeConversation,
+                member_ids: [p.id],
+              });
+              box.innerHTML = "";
+              $("groupAddSearch").value = "";
+              await loadGroupMembers();
+              renderGroupPanel();
+              toast(peerName(p) + " added.");
+            } catch (err) {
+              toast("Couldn't add: " + err.message);
+            }
+          }),
+        );
+      }
+    }),
+  );
+  $("leaveGroupBtn").addEventListener("click", async () => {
+    if (!window.confirm("Leave this group?")) return;
+    try {
+      await rpcOrThrow("leave_group", {
+        target_conversation_id: activeConversation,
+      });
+      closeActiveChat();
+      toast("You left the group.");
+    } catch (err) {
+      toast("Couldn't leave: " + err.message);
+    }
+  });
+
+  // ---- Online status, last seen, and other people's profiles ----
+  let onlineIds = new Set(),
+    peerLastSeen = null,
+    peerIsTyping = false,
+    presenceChannel = null,
+    heartbeat = null,
+    dotTimer = null,
+    profilePeer = null;
+  const isOnline = (id) =>
+    appSettings.show_last_seen !== false && onlineIds.has(id);
+
+  function formatLastSeen(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const time = d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    if (d.toDateString() === now.toDateString())
+      return "last seen today at " + time;
+    if (d.toDateString() === new Date(now - 864e5).toDateString())
+      return "last seen yesterday at " + time;
+    return (
+      "last seen " +
+      d.toLocaleDateString([], { day: "numeric", month: "short" })
+    );
+  }
+  function presenceText(id, lastSeen) {
+    if (appSettings.show_last_seen === false) return "";
+    if (onlineIds.has(id)) return "Online";
+    return lastSeen ? formatLastSeen(lastSeen) : "";
+  }
+  function refreshPeerStatus() {
+    if (!activePeer || peerIsTyping) return;
+    if (activePeer.isGroup) {
+      $("peerStatus").textContent = groupMembers.length
+        ? groupMembers.length + " members"
+        : "Group chat";
+      $("peerStatus").classList.remove("online");
+      return;
+    }
+    const t = presenceText(activePeer.id, peerLastSeen);
+    $("peerStatus").textContent = t || "Private conversation";
+    $("peerStatus").classList.toggle("online", t === "Online");
+  }
+  async function loadPeerPresence(peerId) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("last_seen_at")
+      .eq("id", peerId)
+      .maybeSingle();
+    if (activePeer?.id === peerId) peerLastSeen = data?.last_seen_at || null;
+  }
+
+  async function beat() {
+    if (!currentUser || appSettings.show_last_seen === false) return;
+    await supabase
+      .from("profiles")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", currentUser.id);
+  }
+  function startPresence() {
+    if (presenceChannel || !currentUser) return;
+    presenceChannel = supabase.channel("online-users", {
+      config: { presence: { key: currentUser.id } },
+    });
+    presenceChannel
+      .on("presence", { event: "sync" }, () => {
+        onlineIds = new Set(Object.keys(presenceChannel.presenceState()));
+        refreshPeerStatus();
+        clearTimeout(dotTimer);
+        dotTimer = setTimeout(loadChats, 800);
+        if (activePeer && !activePeer.isGroup)
+          loadPeerPresence(activePeer.id).then(refreshPeerStatus);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED" && appSettings.show_last_seen !== false)
+          await presenceChannel.track({ at: Date.now() });
+      });
+    beat();
+    heartbeat = setInterval(beat, 60000);
+  }
+  function stopPresence() {
+    clearInterval(heartbeat);
+    if (presenceChannel) supabase.removeChannel(presenceChannel);
+    presenceChannel = null;
+    onlineIds = new Set();
+  }
+  document.addEventListener("visibilitychange", beat);
+
+  $("lastSeenToggle").addEventListener("change", async (e) => {
+    const ok = await saveSetting({ show_last_seen: e.target.checked });
+    if (!ok) return (e.target.checked = !e.target.checked);
+    if (e.target.checked) {
+      await presenceChannel?.track({ at: Date.now() });
+      beat();
+    } else {
+      await presenceChannel?.untrack();
+      await supabase
+        .from("profiles")
+        .update({ last_seen_at: null })
+        .eq("id", currentUser.id);
+    }
+    refreshPeerStatus();
+    loadChats();
+  });
+
+  function openLightbox(url) {
+    const box = document.createElement("div");
+    box.className = "lightbox";
+    box.innerHTML = `<img src="${escapeHtml(url)}" alt="" />`;
+    box.addEventListener("click", () => box.remove());
+    document.body.appendChild(box);
+  }
+  async function openPeerProfile(peer) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("username, display_name, bio, avatar_url, last_seen_at")
+      .eq("id", peer.id)
+      .maybeSingle();
+    const p = { ...peer, ...(data || {}) };
+    profilePeer = p;
+    setAvatar($("peerProfileAvatar"), p);
+    $("peerProfileAvatar").dataset.url = p.avatar_url || "";
+    $("peerProfileAvatar").classList.toggle("clickable", Boolean(p.avatar_url));
+    $("peerProfileName").textContent = peerName(p);
+    $("peerProfileUser").textContent = "@" + p.username;
+    const status = presenceText(p.id, p.last_seen_at);
+    $("peerProfileStatus").textContent = status;
+    $("peerProfileStatus").classList.toggle("online", status === "Online");
+    $("peerProfileBio").textContent = p.bio || "No bio yet.";
+    $("peerBlockBtn").textContent = blockedIds.has(p.id)
+      ? "Unblock user"
+      : "Block user";
+    $("peerProfilePanel").classList.remove("hidden");
+  }
+  $("peerProfileAvatar").addEventListener("click", (e) => {
+    if (e.currentTarget.dataset.url) openLightbox(e.currentTarget.dataset.url);
+  });
+  $("peerProfileBack").addEventListener("click", () =>
+    $("peerProfilePanel").classList.add("hidden"),
+  );
+  $("peerBlockBtn").addEventListener("click", async () => {
+    if (!profilePeer) return;
+    const isBlocked = blockedIds.has(profilePeer.id);
+    if (
+      !isBlocked &&
+      !window.confirm(
+        "Block " +
+          peerName(profilePeer) +
+          "? They won't be able to message you.",
+      )
+    )
+      return;
+    const { error } = isBlocked
+      ? await supabase
+          .from("user_blocks")
+          .delete()
+          .eq("blocker_id", currentUser.id)
+          .eq("blocked_id", profilePeer.id)
+      : await supabase
+          .from("user_blocks")
+          .insert({ blocker_id: currentUser.id, blocked_id: profilePeer.id });
+    if (error) return toast("Couldn't update block: " + error.message);
+    await loadBlocks();
+    $("peerBlockBtn").textContent = isBlocked ? "Block user" : "Unblock user";
+    toast(isBlocked ? "User unblocked." : "User blocked.");
+  });
+  document.querySelector(".chat-person").addEventListener("click", (e) => {
+    if (!activePeer || (innerWidth <= 760 && e.clientX < 45)) return;
+    if (activePeer.isGroup) return openGroupPanel();
+    openPeerProfile(activePeer);
+  });
+
+  // ---- Show / hide password (eye) ----
+  (function addPasswordEye() {
+    const input = $("password");
+    if (!input) return;
+    const wrap = document.createElement("div");
+    wrap.className = "pw-wrap";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const eyeOpen =
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const eyeOff =
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9.9 9.9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>';
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pw-eye";
+    btn.setAttribute("aria-label", "Show password");
+    btn.setAttribute("aria-pressed", "false");
+    btn.innerHTML = eyeOpen;
+    wrap.appendChild(btn);
+    btn.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = show ? eyeOff : eyeOpen;
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      btn.setAttribute("aria-pressed", String(show));
+      input.focus();
+    });
+  })();
+
+  // ---- Animations ----
+  const animatedIds = new Set();
+  function flySend() {
+    const btn = $("sendBtn");
+    btn.classList.remove("sent");
+    void btn.offsetWidth; // restart the animation
+    btn.classList.add("sent");
+    navigator.vibrate?.(8);
+  }
+  $("sendBtn").addEventListener("click", () => {
+    if ($("messageInput").value.trim()) flySend();
+  });
+  $("messageInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && $("messageInput").value.trim())
+      flySend();
+  });
+
+  // ---- GIFs and stickers (KLIPY) ----
+  const KLIPY_KEY = cfg.KLIPY_API_KEY;
+  const FAV_KEY = "chatspace-gif-favs";
+  let gifTab = "gifs",
+    gifSearchTimer = null;
+  const loadFavs = () => {
+    try {
+      return JSON.parse(localStorage.getItem(FAV_KEY)) || [];
+    } catch {
+      return [];
+    }
+  };
+  const saveFavs = (list) => {
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(list.slice(0, 60)));
+    } catch {}
+  };
+  function klipyUrl(item, sizes) {
+    const f = item.file || item.files || {};
+    const formats = ["gif", "webp", "png"];
+    for (const s of sizes)
+      for (const fmt of formats) if (f[s]?.[fmt]?.url) return f[s][fmt].url;
+    for (const fmt of formats) if (f[fmt]?.url) return f[fmt].url;
+    return null;
+  }
+  async function fetchKlipy(type, q) {
+    if (!KLIPY_KEY) throw new Error("GIF key missing in config.js");
+    const params = new URLSearchParams({
+      per_page: "24",
+      page: "1",
+      customer_id: currentUser.id,
+    });
+    if (q) params.set("q", q);
+    const res = await fetch(
+      `https://api.klipy.com/api/v1/${encodeURIComponent(KLIPY_KEY)}/${type}/${q ? "search" : "trending"}?${params}`,
+    );
+    if (!res.ok) throw new Error("GIF service error " + res.status);
+    const json = await res.json();
+    return (json?.data?.data || [])
+      .map((it) => ({
+        preview: klipyUrl(it, ["sm", "xs", "md", "hd"]),
+        full: klipyUrl(it, ["md", "hd", "sm", "xs"]),
+      }))
+      .filter((x) => x.preview && x.full);
+  }
+  async function sendGif(url) {
+    if (!activeConversation) return;
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: activeConversation,
+      sender_id: currentUser.id,
+      content: null,
+      attachment_url: url,
+      attachment_type: "image",
+      reply_to: replyingToMessage?.id || null,
+    });
+    if (error)
+      return toast(
+        error.code === "42501"
+          ? "You can't send messages to this person."
+          : "Message failed: " + error.message,
+      );
+    cancelReply();
+    $("gifPanel").classList.add("hidden");
+    await loadMessages();
+    loadChats();
+  }
+  async function renderGifGrid() {
+    const grid = $("gifGrid");
+    const q = $("gifSearch").value.trim();
+    grid.innerHTML = '<p class="tiny muted">Loading…</p>';
+    let items;
+    try {
+      items = gifTab === "saved" ? loadFavs() : await fetchKlipy(gifTab, q);
+    } catch (err) {
+      grid.innerHTML = `<p class="tiny muted">Couldn't load: ${escapeHtml(err.message)}</p>`;
+      return;
+    }
+    if (!items.length) {
+      grid.innerHTML = `<p class="tiny muted">${gifTab === "saved" ? "Tap ★ on a GIF to save it here." : "Nothing found."}</p>`;
+      return;
+    }
+    grid.innerHTML = "";
+    const favs = loadFavs();
+    for (const item of items) {
+      const cell = document.createElement("div");
+      cell.className = "gif-cell";
+      const isFav = favs.some((f) => f.full === item.full);
+      cell.innerHTML = `<img src="${escapeHtml(item.preview)}" alt="" loading="lazy" /><button type="button" class="gif-star${isFav ? " on" : ""}" aria-label="Save">★</button>`;
+      cell
+        .querySelector("img")
+        .addEventListener("click", () => sendGif(item.full));
+      cell.querySelector(".gif-star").addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cur = loadFavs();
+        const has = cur.some((f) => f.full === item.full);
+        saveFavs(
+          has ? cur.filter((f) => f.full !== item.full) : [item, ...cur],
+        );
+        e.target.classList.toggle("on", !has);
+        if (gifTab === "saved") renderGifGrid();
+      });
+      grid.appendChild(cell);
+    }
+  }
+  (function buildGifPanel() {
+    const panel = document.createElement("div");
+    panel.id = "gifPanel";
+    panel.className = "gif-panel hidden";
+    panel.innerHTML = `<div class="gif-tabs">
+        <button type="button" data-gt="gifs" class="active">GIFs</button>
+        <button type="button" data-gt="stickers">Stickers</button>
+        <button type="button" data-gt="saved">Saved</button>
+      </div>
+      <input id="gifSearch" placeholder="Search KLIPY" aria-label="Search KLIPY" />
+      <div id="gifGrid" class="gif-grid"></div>
+      <small class="muted">Powered by KLIPY</small>`;
+    $("composer").insertBefore(
+      panel,
+      $("composer").querySelector(".composer-row"),
+    );
+    panel.querySelectorAll("[data-gt]").forEach((b) =>
+      b.addEventListener("click", () => {
+        gifTab = b.dataset.gt;
+        panel
+          .querySelectorAll("[data-gt]")
+          .forEach((x) => x.classList.toggle("active", x === b));
+        $("gifSearch").classList.toggle("hidden", gifTab === "saved");
+        renderGifGrid();
+      }),
+    );
+    $("gifSearch").addEventListener("input", () => {
+      clearTimeout(gifSearchTimer);
+      gifSearchTimer = setTimeout(renderGifGrid, 350);
+    });
+    $("gifBtn").addEventListener("click", () => {
+      const open = panel.classList.toggle("hidden") === false;
+      if (open) renderGifGrid();
+    });
+  })();
+
   // ---- In-app camera (PC webcam and phones) ----
   let cameraStream = null;
   function closeCamera() {
@@ -1711,12 +2429,18 @@
   });
 
   $("logoutBtn").addEventListener("click", async () => {
+    stopPresence();
+    if (listChannel) {
+      supabase.removeChannel(listChannel);
+      listChannel = null;
+    }
     if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
     await supabase.auth.signOut();
     currentUser = currentProfile = activePeer = activeConversation = null;
     appScreen.classList.remove("chat-open");
     showAuth();
     $("password").value = "";
+    $("password").type = "password";
     authMessage("You've logged out.");
   });
   // Mobile back navigation: tapping the chat header's leading chevron returns to the chat list.
@@ -1806,6 +2530,10 @@
   function showView(view) {
     const isProfile = view === "profile";
     $("profilePanel").classList.toggle("hidden", !isProfile);
+    $("peerProfilePanel").classList.add("hidden");
+    $("groupPanel").classList.add("hidden");
+    $("newChatPanel").classList.toggle("hidden", view !== "new");
+    if (view === "new") ncShow("ncHome");
     $("settingsPanel").classList.toggle("hidden", view !== "settings");
     if (view === "settings") loadSettings();
     document
@@ -1889,6 +2617,10 @@
     document.querySelectorAll("#messages .tick").forEach(setTick);
   }
   async function fetchReadState() {
+    if (activePeer?.isGroup) {
+      peerReadAt = null;
+      return updateTicks();
+    }
     const { data, error } = await supabase.rpc("get_read_state", {
       target_conversation_id: activeConversation,
     });
@@ -1916,6 +2648,7 @@
       ? "You blocked this user. Unblock to send messages."
       : "Write a message...";
     $("sendBtn").disabled = Boolean(blocked);
+    $("gifBtn").disabled = Boolean(blocked);
   }
 
   function watchConversationExtras(conversationId) {
@@ -1925,6 +2658,9 @@
     if (typingChannel) supabase.removeChannel(typingChannel);
     applyBlockState();
     applyWallpaper(activePeer?.preferences?.wallpaper);
+    peerLastSeen = null;
+    if (activePeer && !activePeer.isGroup)
+      loadPeerPresence(activePeer.id).then(refreshPeerStatus);
     fetchReadState();
     readsChannel = supabase
       .channel("reads-" + conversationId)
@@ -1944,10 +2680,12 @@
         config: { broadcast: { self: false } },
       })
       .on("broadcast", { event: "typing" }, () => {
+        peerIsTyping = true;
         $("peerStatus").textContent = "typing…";
         clearTimeout(typingTimer);
         typingTimer = setTimeout(() => {
-          $("peerStatus").textContent = "Private conversation";
+          peerIsTyping = false;
+          refreshPeerStatus();
         }, 3000);
       })
       .subscribe();
@@ -2016,6 +2754,7 @@
       .maybeSingle();
     if (data) appSettings = { ...appSettings, ...data };
     applyAppearance();
+    startPresence();
   }
   async function saveSetting(changes) {
     appSettings = { ...appSettings, ...changes };
@@ -2047,6 +2786,7 @@
         ),
       );
     $("soundToggle").checked = appSettings.notification_sound;
+    $("lastSeenToggle").checked = appSettings.show_last_seen !== false;
     $("notifyToggle").checked =
       appSettings.notifications_enabled &&
       "Notification" in window &&
