@@ -91,9 +91,29 @@
         </div>
         <div id="searchResults" class="search-results"></div>
         <div class="section-heading">
-          <span>RECENT CHATS</span><span class="live-dot"></span>
+          <span>RECENT CHATS</span>
+          <span class="live-dot"></span>
         </div>
+
+        <div class="chat-list-tabs">
+          <button
+            id="recentChatsBtn"
+            class="chat-list-tab active"
+            type="button"
+          >
+            Recent
+          </button>
+
+          <button id="archivedChatsBtn" class="chat-list-tab" type="button">
+            Archived
+            <span id="archivedCount" class="archived-count hidden">0</span>
+          </button>
+        </div>
+
         <div id="chatList" class="chat-list"></div>
+
+        <div id="archivedChatList" class="chat-list hidden"></div>
+
         <div class="sidebar-bottom">
           <div class="user-avatar" id="myAvatar">?</div>
           <div class="my-info">
@@ -144,35 +164,76 @@
         </div>
         <div id="messages" class="messages hidden" aria-live="polite"></div>
         <div id="composer" class="composer hidden">
+          <!-- Reply preview -->
+          <div id="replyPreview" class="reply-preview hidden">
+            <div class="reply-preview-content">
+              <span class="reply-preview-label">Replying to message</span>
+              <p id="replyPreviewText"></p>
+            </div>
+
+            <button
+              id="cancelReplyBtn"
+              class="cancel-reply-btn"
+              type="button"
+              aria-label="Cancel reply"
+              title="Cancel reply"
+            >
+              &times;
+            </button>
+          </div>
+
+          <!-- Attachment preview -->
+
           <div id="attachmentPreview" class="attachment-preview hidden"></div>
+
           <div class="composer-row">
             <label class="attach-btn" title="Attach a file" for="fileInput"
               >＋</label
             >
+
             <input
               id="fileInput"
               type="file"
               hidden
               accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.csv"
             />
+
             <textarea
               id="messageInput"
               rows="1"
               placeholder="Write a message..."
               aria-label="Write a message"
             ></textarea>
+
             <button
               id="recordBtn"
               class="round-btn"
               title="Record voice note"
               aria-label="Record voice note"
             >
-              🎙
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10v2a7 7 0 0 0 14 0v-2" />
+                <line x1="12" x2="12" y1="19" y2="22" />
+                <line x1="8" x2="16" y1="22" y2="22" />
+              </svg>
             </button>
+
             <button id="sendBtn" class="send-btn" aria-label="Send message">
               ➤
             </button>
           </div>
+
           <p class="composer-hint">
             Enter to send · Shift + Enter for a new line · Attachments up to 10
             MB
