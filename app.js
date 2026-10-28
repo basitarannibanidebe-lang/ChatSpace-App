@@ -41,6 +41,42 @@
           "'": "&#39;",
         })[c],
     );
+  const avatarInner = (p) =>
+    p.avatar_url
+      ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
+      : escapeHtml((peerName(p)[0] || "?").toUpperCase());
+  const peerName = (p) => p.display_name || p.username;
+  function setAvatar(el, p) {
+    el.innerHTML = p.avatar_url
+      ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
+      : escapeHtml((peerName(p)[0] || "?").toUpperCase());
+  }
+  let listChannel = null,
+    listTimer = null;
+  function watchChatList() {
+    if (listChannel) return;
+    listChannel = supabase
+      .channel("chat-list")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload) => {
+          if (payload.new.sender_id !== currentUser.id)
+            notifyIncoming(payload.new);
+          if (payload.new.conversation_id === activeConversation) return;
+          clearTimeout(listTimer);
+          listTimer = setTimeout(loadChats, 400);
+        },
+      )
+      .subscribe();
+  }
+  async function markRead() {
+    if (!activeConversation) return;
+    await supabase.rpc("mark_conversation_read", {
+      target_conversation_id: activeConversation,
+    });
+    loadChats();
+  }
   function toast(msg) {
     const el = $("toast");
     el.textContent = msg;
@@ -164,8 +200,9 @@
       if (insertError) throw insertError;
       currentProfile = inserted;
     } else currentProfile = data;
-    $("myUsername").textContent = currentProfile.username;
-    $("myAvatar").textContent = currentProfile.username[0].toUpperCase();
+    $("myUsername").textContent = peerName(currentProfile);
+    setAvatar($("myAvatar"), currentProfile);
+    loadAppearance();
   }
 
   async function getChatPreferences(conversationIds) {
@@ -174,7 +211,7 @@
     const { data, error } = await supabase
       .from("chat_preferences")
       .select(
-        "conversation_id,is_pinned,is_archived,is_deleted,is_muted,is_locked",
+        "conversation_id,is_pinned,is_archived,is_deleted,is_muted,is_locked,wallpaper",
       )
       .eq("user_id", currentUser.id)
       .in("conversation_id", conversationIds);
@@ -199,16 +236,19 @@
     if (readError) throw readError;
 
     if (existing) {
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from("chat_preferences")
         .update({
           ...changes,
           updated_at: new Date().toISOString(),
         })
         .eq("user_id", currentUser.id)
-        .eq("conversation_id", conversationId);
+        .eq("conversation_id", conversationId)
+        .select("conversation_id");
 
       if (error) throw error;
+      if (!updated?.length)
+        throw new Error("The database blocked this change (permissions).");
     } else {
       const { error } = await supabase.from("chat_preferences").insert({
         user_id: currentUser.id,
@@ -222,80 +262,37 @@
   }
 
   async function loadChats() {
-    const { data: rows, error } = await supabase
-      .from("conversation_participants")
-      .select("conversation_id,user_id")
-      .eq("user_id", currentUser.id);
-
+    const { data: rows, error } = await supabase.rpc("get_my_chats");
     if (error) {
       toast("Couldn't load chats: " + error.message);
       return;
     }
-
-    const peers = [];
-
-    for (const row of rows || []) {
-      const { data: members, error: membersError } = await supabase
-        .from("conversation_participants")
-        .select("user_id")
-        .eq("conversation_id", row.conversation_id);
-
-      if (membersError) continue;
-
-      const peer = (members || []).find(
-        (member) => member.user_id !== currentUser.id,
-      );
-
-      if (!peer) continue;
-
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id,username")
-        .eq("id", peer.user_id)
-        .maybeSingle();
-
-      if (
-        profileError ||
-        !profile ||
-        peers.some((item) => item.conversationId === row.conversation_id)
-      ) {
-        continue;
-      }
-
-      peers.push({
-        ...profile,
-        conversationId: row.conversation_id,
-      });
-    }
-
-    const conversationIds = peers.map((peer) => peer.conversationId);
-
-    const preferences = await getChatPreferences(conversationIds);
-
-    // Find the latest message in each conversation.
-    const latestTimes = new Map();
-
-    await Promise.all(
-      conversationIds.map(async (conversationId) => {
-        const { data, error } = await supabase
-          .from("messages")
-          .select("created_at")
-          .eq("conversation_id", conversationId)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        latestTimes.set(
-          conversationId,
-          !error && data?.length ? new Date(data[0].created_at).getTime() : 0,
-        );
-      }),
+    // Group chats arrive with Phase 7; for now show one-to-one chats.
+    const peers = (rows || [])
+      .filter((r) => !r.is_group && r.peer_id)
+      .map((r) => ({
+        id: r.peer_id,
+        username: r.peer_username,
+        display_name: r.peer_display_name,
+        avatar_url: r.peer_avatar_url,
+        conversationId: r.conversation_id,
+        lastMessage: r.last_message,
+        lastFromMe: r.last_message_sender === currentUser.id,
+        unread: Number(r.unread_count) || 0,
+        latestTime: r.last_message_at
+          ? new Date(r.last_message_at).getTime()
+          : 0,
+      }));
+    const preferences = await getChatPreferences(
+      peers.map((p) => p.conversationId),
     );
+    watchChatList();
+    await loadBlocks();
 
     const allPeers = peers
       .map((peer) => ({
         ...peer,
         preferences: preferences.get(peer.conversationId) || {},
-        latestTime: latestTimes.get(peer.conversationId) || 0,
       }))
       .filter((peer) => !peer.preferences.is_deleted)
       .sort((a, b) => {
@@ -310,6 +307,7 @@
         );
       });
 
+    lastPeers = allPeers;
     const recentPeers = allPeers.filter(
       (peer) => !peer.preferences.is_archived,
     );
@@ -370,25 +368,25 @@
         .filter(Boolean)
         .join(" ");
 
+      const preview = peer.lastMessage
+        ? (peer.lastFromMe ? "You: " : "") + peer.lastMessage
+        : "Say hello 👋";
       item.innerHTML = `
-        <span class="user-avatar">
-          ${escapeHtml(peer.username[0].toUpperCase())}
-        </span>
+        <span class="user-avatar">${avatarInner(peer)}</span>
 
         <span class="chat-item-details">
           <strong>
-            ${escapeHtml(peer.username)}
-            ${markers}
+            ${escapeHtml(peerName(peer))} ${markers}
           </strong>
 
           <small>
-            ${peer.latestTime ? "Recent conversation" : "Open conversation"}
+            ${escapeHtml(preview)}
           </small>
         </span>
 
-        <button
-          type="button"
-          class="chat-menu-trigger"
+        ${peer.unread ? `<span class="unread-badge">${peer.unread > 99 ? "99+" : peer.unread}</span>` : ""}
+
+        <button type="button" class="chat-menu-trigger"
           aria-label="Chat options"
           title="Chat options"
         >⋮</button>
@@ -432,6 +430,8 @@
       [prefs.is_pinned ? "Unpin chat" : "Pin chat", "pin"],
       [prefs.is_archived ? "Restore chat" : "Archive chat", "archive"],
       [prefs.is_muted ? "Unmute chat" : "Mute chat", "mute"],
+      [blockedIds.has(peer.id) ? "Unblock user" : "Block user", "block"],
+      ["Change wallpaper", "wallpaper"],
       ["Delete chat from my list", "delete"],
     ];
 
@@ -469,6 +469,36 @@
             });
 
             toast(prefs.is_muted ? "Chat unmuted." : "Chat muted.");
+          }
+
+          if (action === "wallpaper") {
+            openWallpaperPicker(peer);
+            return;
+          }
+
+          if (action === "block") {
+            const isBlocked = blockedIds.has(peer.id);
+            if (
+              !isBlocked &&
+              !window.confirm(
+                "Block " +
+                  peerName(peer) +
+                  "? They won't be able to message you.",
+              )
+            )
+              return;
+            const { error: blockError } = isBlocked
+              ? await supabase
+                  .from("user_blocks")
+                  .delete()
+                  .eq("blocker_id", currentUser.id)
+                  .eq("blocked_id", peer.id)
+              : await supabase
+                  .from("user_blocks")
+                  .insert({ blocker_id: currentUser.id, blocked_id: peer.id });
+            if (blockError) throw blockError;
+            await loadBlocks();
+            toast(isBlocked ? "User unblocked." : "User blocked.");
           }
 
           if (action === "delete") {
@@ -591,13 +621,15 @@
   async function openConversation(peer, conversationId) {
     activePeer = peer;
     activeConversation = conversationId;
-    $("peerName").textContent = peer.username;
-    $("peerAvatar").textContent = peer.username[0].toUpperCase();
+    $("peerName").textContent = peerName(peer);
+    setAvatar($("peerAvatar"), peer);
     $("peerStatus").textContent = "Private conversation";
     $("welcomePanel").classList.add("hidden");
     $("messages").classList.remove("hidden");
     $("composer").classList.remove("hidden");
     appScreen.classList.add("chat-open");
+    markRead();
+    watchConversationExtras(conversationId);
     document
       .querySelectorAll(".chat-item")
       .forEach((el) =>
@@ -627,8 +659,12 @@
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          if (payload.new.sender_id !== currentUser.id)
-            renderMessage(payload.new);
+          if (payload.new.sender_id !== currentUser.id) {
+            resolveAttachments([payload.new]).then(() =>
+              renderMessage(payload.new),
+            );
+            markRead();
+          }
         },
       )
       .subscribe();
@@ -652,6 +688,34 @@
         },
       )
       .subscribe();
+  }
+
+  // Fresh signed links for attachments, so they never expire on screen.
+  // Works for new messages (attachment_path) and old ones (path is
+  // recovered from the old signed link).
+  const pathFromUrl = (url) => {
+    const m = /\/object\/sign\/chat-attachments\/([^?]+)/.exec(url || "");
+    return m ? decodeURIComponent(m[1]) : null;
+  };
+  async function resolveAttachments(msgs) {
+    const todo = msgs
+      .filter((m) => m.attachment_url && !m.deleted_for_everyone)
+      .map((m) => ({
+        m,
+        path: m.attachment_path || pathFromUrl(m.attachment_url),
+      }))
+      .filter((x) => x.path);
+    if (!todo.length) return;
+    const { data, error } = await supabase.storage
+      .from("chat-attachments")
+      .createSignedUrls([...new Set(todo.map((x) => x.path))], 60 * 60 * 6);
+    if (error || !data) return;
+    const urls = new Map(
+      data.filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl]),
+    );
+    for (const { m, path } of todo) {
+      if (urls.has(path)) m.attachment_url = urls.get(path);
+    }
   }
 
   async function loadMessages() {
@@ -686,6 +750,8 @@
       toast("Couldn't load messages: " + error.message);
       return;
     }
+
+    await resolveAttachments(data || []);
 
     // Cache every loaded message so replies can still find their originals.
     for (const msg of data || []) {
@@ -1102,6 +1168,13 @@
         minute: "2-digit",
       }) +
       (msg.is_edited ? " · edited" : "");
+    if (mine && !msg.deleted_for_everyone) {
+      const tick = document.createElement("span");
+      tick.className = "tick";
+      tick.dataset.ts = msg.created_at;
+      setTick(tick);
+      meta.appendChild(tick);
+    }
 
     const actions = document.createElement("div");
     actions.className = "message-actions";
@@ -1409,7 +1482,8 @@
       return;
     }
     if (!content.trim() && !attachment) return;
-    let attachmentUrl = null,
+    let attachmentPathValue = null,
+      attachmentUrl = null,
       finalContent = content.trim();
     if (attachment) {
       if (attachment.size > 10 * 1024 * 1024) {
@@ -1441,6 +1515,7 @@
         return;
       }
       attachmentUrl = signed.signedUrl;
+      attachmentPathValue = path;
       if (attachmentType !== "audio")
         finalContent = attachment.name || "Shared file";
     }
@@ -1449,15 +1524,21 @@
       sender_id: currentUser.id,
       content: finalContent || null,
       attachment_url: attachmentUrl,
+      attachment_path: attachmentPathValue,
       attachment_type: attachment ? attachmentType : null,
       reply_to: replyingToMessage?.id || null,
     });
     if (error) {
-      toast("Message failed: " + error.message);
+      toast(
+        error.code === "42501"
+          ? "You can't send messages to this person."
+          : "Message failed: " + error.message,
+      );
       return;
     }
     cancelReply();
     await loadMessages();
+    loadChats();
   }
 
   $("sendBtn").addEventListener("click", async () => {
@@ -1491,6 +1572,72 @@
     } finally {
       $("sendBtn").disabled = false;
     }
+  });
+
+  // ---- In-app camera (PC webcam and phones) ----
+  let cameraStream = null;
+  function closeCamera() {
+    cameraStream?.getTracks().forEach((t) => t.stop());
+    cameraStream = null;
+    document.querySelector(".camera-modal")?.remove();
+  }
+  $("cameraBtn").addEventListener("click", async () => {
+    if (!navigator.mediaDevices?.getUserMedia) return $("cameraInput").click();
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+    } catch (err) {
+      return toast(
+        "Camera unavailable. Allow camera access in your browser, and check no other app is using it.",
+      );
+    }
+    const modal = document.createElement("div");
+    modal.className = "camera-modal";
+    modal.innerHTML = `<div class="camera-box">
+      <video autoplay playsinline muted></video>
+      <div class="camera-actions">
+        <button type="button" class="ghost-btn" data-cam="cancel">Cancel</button>
+        <button type="button" class="primary-btn" data-cam="snap">Take photo</button>
+      </div></div>`;
+    document.body.appendChild(modal);
+    const video = modal.querySelector("video");
+    video.srcObject = cameraStream;
+    modal
+      .querySelector('[data-cam="cancel"]')
+      .addEventListener("click", closeCamera);
+    modal.querySelector('[data-cam="snap"]').addEventListener("click", () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          closeCamera();
+          if (!blob) return;
+          const file = new File([blob], `photo-${Date.now()}.jpg`, {
+            type: "image/jpeg",
+          });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          $("fileInput").files = transfer.files;
+          $("fileInput").dispatchEvent(new Event("change"));
+        },
+        "image/jpeg",
+        0.9,
+      );
+    });
+  });
+
+  $("cameraInput").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    $("fileInput").files = transfer.files;
+    $("fileInput").dispatchEvent(new Event("change"));
   });
 
   $("fileInput").addEventListener("change", (event) => {
@@ -1654,6 +1801,381 @@
 
     await loadChats();
   });
+
+  // ---- Navigation and profile page ----
+  function showView(view) {
+    const isProfile = view === "profile";
+    $("profilePanel").classList.toggle("hidden", !isProfile);
+    $("settingsPanel").classList.toggle("hidden", view !== "settings");
+    if (view === "settings") loadSettings();
+    document
+      .querySelectorAll(".nav-btn")
+      .forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
+    if (isProfile) {
+      setAvatar($("profileAvatar"), currentProfile);
+      $("profileUsername").textContent = currentProfile.username;
+      $("displayNameInput").value = currentProfile.display_name || "";
+      $("bioInput").value = currentProfile.bio || "";
+    }
+  }
+  document
+    .querySelectorAll(".nav-btn")
+    .forEach((b) => b.addEventListener("click", () => showView(b.dataset.nav)));
+
+  function refreshMyProfileUi() {
+    $("myUsername").textContent = peerName(currentProfile);
+    setAvatar($("myAvatar"), currentProfile);
+    setAvatar($("profileAvatar"), currentProfile);
+  }
+
+  $("saveProfileBtn").addEventListener("click", async () => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({
+        display_name: $("displayNameInput").value.trim() || null,
+        bio: $("bioInput").value.trim() || null,
+      })
+      .eq("id", currentUser.id)
+      .select()
+      .single();
+    if (error) return toast("Could not save profile: " + error.message);
+    currentProfile = data;
+    refreshMyProfileUi();
+    loadChats();
+    toast("Profile saved.");
+  });
+
+  $("avatarInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return toast("Choose an image file.");
+    if (file.size > 2 * 1024 * 1024) return toast("Photo must be under 2 MB.");
+    const ext = (file.name.split(".").pop() || "jpg")
+      .replace(/[^a-z0-9]/gi, "")
+      .toLowerCase();
+    const path = `${currentUser.id}/avatar-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (upErr) return toast("Upload failed: " + upErr.message);
+    const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ avatar_url: pub.publicUrl })
+      .eq("id", currentUser.id)
+      .select()
+      .single();
+    if (error) return toast("Could not save photo: " + error.message);
+    currentProfile = data;
+    refreshMyProfileUi();
+    toast("Photo updated.");
+  });
+
+  // ---- Read receipts, typing indicator, blocking, settings ----
+  let peerReadAt = null,
+    blockedIds = new Set(),
+    readsChannel = null,
+    typingChannel = null,
+    typingTimer = null,
+    lastTypingSent = 0;
+
+  function setTick(el) {
+    const read = peerReadAt && new Date(el.dataset.ts) <= peerReadAt;
+    el.textContent = read ? " ✓✓" : " ✓";
+    el.classList.toggle("read", Boolean(read));
+  }
+  function updateTicks() {
+    document.querySelectorAll("#messages .tick").forEach(setTick);
+  }
+  async function fetchReadState() {
+    const { data, error } = await supabase.rpc("get_read_state", {
+      target_conversation_id: activeConversation,
+    });
+    if (error) return;
+    const times = (data || [])
+      .map((r) => (r.last_read_at ? new Date(r.last_read_at) : null))
+      .filter(Boolean);
+    peerReadAt = times.length ? new Date(Math.max(...times)) : null;
+    updateTicks();
+  }
+
+  async function loadBlocks() {
+    const { data } = await supabase
+      .from("user_blocks")
+      .select("blocked_id")
+      .eq("blocker_id", currentUser.id);
+    blockedIds = new Set((data || []).map((r) => r.blocked_id));
+    applyBlockState();
+  }
+  function applyBlockState() {
+    const blocked = activePeer && blockedIds.has(activePeer.id);
+    const input = $("messageInput");
+    input.disabled = Boolean(blocked);
+    input.placeholder = blocked
+      ? "You blocked this user. Unblock to send messages."
+      : "Write a message...";
+    $("sendBtn").disabled = Boolean(blocked);
+  }
+
+  function watchConversationExtras(conversationId) {
+    peerReadAt = null;
+    clearTimeout(typingTimer);
+    if (readsChannel) supabase.removeChannel(readsChannel);
+    if (typingChannel) supabase.removeChannel(typingChannel);
+    applyBlockState();
+    applyWallpaper(activePeer?.preferences?.wallpaper);
+    fetchReadState();
+    readsChannel = supabase
+      .channel("reads-" + conversationId)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "conversation_participants",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        fetchReadState,
+      )
+      .subscribe();
+    typingChannel = supabase
+      .channel("typing-" + conversationId, {
+        config: { broadcast: { self: false } },
+      })
+      .on("broadcast", { event: "typing" }, () => {
+        $("peerStatus").textContent = "typing…";
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+          $("peerStatus").textContent = "Private conversation";
+        }, 3000);
+      })
+      .subscribe();
+  }
+  $("messageInput").addEventListener("input", () => {
+    if (!typingChannel || Date.now() - lastTypingSent < 2000) return;
+    lastTypingSent = Date.now();
+    typingChannel.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { user: currentUser.id },
+    });
+  });
+
+  // ---- Personalization: theme, accent, wallpapers, notifications ----
+  const WALLPAPERS = {
+    none: ["Default", ""],
+    aurora: ["Aurora", "linear-gradient(135deg,#1e1b4b,#312e81 55%,#0e7490)"],
+    sunset: ["Sunset", "linear-gradient(135deg,#4c1d95,#be185d 60%,#f97316)"],
+    forest: ["Forest", "linear-gradient(135deg,#052e16,#166534)"],
+    ocean: ["Ocean", "linear-gradient(160deg,#0c4a6e,#0e7490)"],
+    sand: ["Sand", "linear-gradient(135deg,#f5efe3,#e7d9bd)"],
+  };
+  const ACCENTS = [
+    "#7775ff",
+    "#2563eb",
+    "#0ea5a4",
+    "#16a34a",
+    "#f97316",
+    "#e11d48",
+    "#c026d3",
+  ];
+  let appSettings = {
+    theme: "dark",
+    accent_color: "#7775ff",
+    notifications_enabled: true,
+    notification_sound: true,
+  };
+  let lastPeers = [];
+
+  function applyAppearance() {
+    const t = appSettings.theme;
+    const resolved =
+      t === "system"
+        ? matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark"
+        : t;
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.style.setProperty(
+      "--accent",
+      appSettings.accent_color,
+    );
+    document.documentElement.style.colorScheme = resolved;
+  }
+  matchMedia("(prefers-color-scheme: light)").addEventListener(
+    "change",
+    applyAppearance,
+  );
+
+  async function loadAppearance() {
+    const { data } = await supabase
+      .from("user_settings")
+      .select("*")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    if (data) appSettings = { ...appSettings, ...data };
+    applyAppearance();
+  }
+  async function saveSetting(changes) {
+    appSettings = { ...appSettings, ...changes };
+    applyAppearance();
+    renderSettingsUi();
+    const { error } = await supabase.from("user_settings").upsert({
+      user_id: currentUser.id,
+      ...changes,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) toast("Could not save setting: " + error.message);
+    return !error;
+  }
+  function renderSettingsUi() {
+    document
+      .querySelectorAll("[data-theme-choice]")
+      .forEach((b) =>
+        b.classList.toggle(
+          "active",
+          b.dataset.themeChoice === appSettings.theme,
+        ),
+      );
+    document
+      .querySelectorAll("[data-accent]")
+      .forEach((b) =>
+        b.classList.toggle(
+          "active",
+          b.dataset.accent === appSettings.accent_color,
+        ),
+      );
+    $("soundToggle").checked = appSettings.notification_sound;
+    $("notifyToggle").checked =
+      appSettings.notifications_enabled &&
+      "Notification" in window &&
+      Notification.permission === "granted";
+  }
+  async function loadSettings() {
+    const { data } = await supabase
+      .from("user_settings")
+      .select("show_read_receipts")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    $("receiptsToggle").checked = data?.show_read_receipts ?? true;
+    renderSettingsUi();
+  }
+  $("receiptsToggle").addEventListener("change", async (e) => {
+    const ok = await saveSetting({ show_read_receipts: e.target.checked });
+    if (!ok) e.target.checked = !e.target.checked;
+  });
+  document
+    .querySelectorAll("[data-theme-choice]")
+    .forEach((b) =>
+      b.addEventListener("click", () =>
+        saveSetting({ theme: b.dataset.themeChoice }),
+      ),
+    );
+  $("accentRow").innerHTML = ACCENTS.map(
+    (c) =>
+      `<button type="button" class="swatch" data-accent="${c}" style="background:${c}" aria-label="Accent ${c}"></button>`,
+  ).join("");
+  document
+    .querySelectorAll("[data-accent]")
+    .forEach((b) =>
+      b.addEventListener("click", () =>
+        saveSetting({ accent_color: b.dataset.accent }),
+      ),
+    );
+  $("soundToggle").addEventListener("change", (e) =>
+    saveSetting({ notification_sound: e.target.checked }),
+  );
+  $("notifyToggle").addEventListener("change", async (e) => {
+    if (e.target.checked) {
+      if (!("Notification" in window)) {
+        e.target.checked = false;
+        return toast("This browser doesn't support notifications.");
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        e.target.checked = false;
+        return toast("Notifications are blocked in your browser settings.");
+      }
+    }
+    saveSetting({ notifications_enabled: e.target.checked });
+  });
+
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } catch (_) {}
+  }
+  function notifyIncoming(msg) {
+    const peer = lastPeers.find(
+      (p) => p.conversationId === msg.conversation_id,
+    );
+    if (peer?.preferences?.is_muted) return;
+    if (appSettings.notification_sound) beep();
+    const title = peer ? peerName(peer) : "New message";
+    const body = msg.content || "Sent an attachment";
+    const canPopup =
+      appSettings.notifications_enabled &&
+      "Notification" in window &&
+      Notification.permission === "granted";
+    if (document.hidden && canPopup) {
+      const opts = {
+        body,
+        icon: "/icons/icon-192.png",
+        tag: msg.conversation_id,
+      };
+      if (navigator.serviceWorker?.ready) {
+        navigator.serviceWorker.ready
+          .then((reg) => reg.showNotification(title, opts))
+          .catch(() => new Notification(title, opts));
+      } else new Notification(title, opts);
+    } else if (!document.hidden && msg.conversation_id !== activeConversation) {
+      toast(title + ": " + body);
+    }
+  }
+
+  function applyWallpaper(key) {
+    const css = (WALLPAPERS[key] || WALLPAPERS.none)[1];
+    $("messages").style.background = css;
+  }
+  function openWallpaperPicker(peer) {
+    document.querySelectorAll(".wallpaper-picker").forEach((n) => n.remove());
+    const box = document.createElement("div");
+    box.className = "wallpaper-picker";
+    box.innerHTML =
+      "<h3>Chat wallpaper</h3><div class='wp-grid'></div><button type='button' class='ghost-btn'>Close</button>";
+    for (const [key, [label, css]] of Object.entries(WALLPAPERS)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wp-swatch";
+      b.style.background = css || "var(--panel2)";
+      b.textContent = label;
+      b.addEventListener("click", async () => {
+        try {
+          await saveChatPreference(peer.conversationId, { wallpaper: key });
+          peer.preferences = { ...(peer.preferences || {}), wallpaper: key };
+          if (activeConversation === peer.conversationId) applyWallpaper(key);
+          box.remove();
+          loadChats();
+        } catch (err) {
+          toast("Couldn't save wallpaper: " + err.message);
+        }
+      });
+      box.querySelector(".wp-grid").appendChild(b);
+    }
+    box
+      .querySelector(".ghost-btn")
+      .addEventListener("click", () => box.remove());
+    document.body.appendChild(box);
+  }
 
   async function init() {
     if (!configReady) {

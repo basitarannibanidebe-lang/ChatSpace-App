@@ -75,6 +75,71 @@
     </main>
 
     <main id="appScreen" class="app-shell hidden">
+      <nav class="nav-rail" aria-label="Main">
+        <button
+          class="nav-btn active"
+          data-nav="messages"
+          aria-label="Messages"
+          title="Messages"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            /></svg
+          ><span>Chats</span>
+        </button>
+        <button
+          class="nav-btn"
+          data-nav="profile"
+          aria-label="Profile"
+          title="Profile"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 21a8 8 0 0 1 16 0" /></svg
+          ><span>Profile</span>
+        </button>
+        <button
+          class="nav-btn"
+          data-nav="settings"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
+            /></svg
+          ><span>Settings</span>
+        </button>
+      </nav>
       <aside class="sidebar">
         <div class="sidebar-brand">
           <div class="brand-mark small">C</div>
@@ -198,6 +263,35 @@
               accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.csv"
             />
 
+            <label
+              class="attach-btn"
+              title="Take a photo"
+              id="cameraBtn"
+              role="button"
+              tabindex="0"
+              ><svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+                />
+                <circle cx="12" cy="13" r="4" /></svg
+            ></label>
+            <input
+              id="cameraInput"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+            />
+
             <textarea
               id="messageInput"
               rows="1"
@@ -238,6 +332,79 @@
             Enter to send · Shift + Enter for a new line · Attachments up to 10
             MB
           </p>
+        </div>
+      </section>
+
+      <section id="profilePanel" class="profile-panel hidden">
+        <div class="profile-card">
+          <h2>Your profile</h2>
+          <div class="avatar-edit">
+            <div id="profileAvatar" class="user-avatar xl">?</div>
+            <label class="ghost-btn" for="avatarInput">Change photo</label>
+            <input id="avatarInput" type="file" accept="image/*" hidden />
+          </div>
+          <p class="tiny muted">@<span id="profileUsername"></span></p>
+          <label for="displayNameInput">Display name</label>
+          <input
+            id="displayNameInput"
+            maxlength="40"
+            placeholder="How your name appears"
+          />
+          <label for="bioInput">Bio</label>
+          <textarea
+            id="bioInput"
+            rows="3"
+            maxlength="160"
+            placeholder="Tell people about yourself"
+          ></textarea>
+          <button id="saveProfileBtn" class="primary-btn full" type="button">
+            Save profile
+          </button>
+        </div>
+      </section>
+
+      <section id="settingsPanel" class="profile-panel hidden">
+        <div class="profile-card">
+          <h2>Settings</h2>
+          <label class="setting-row" for="receiptsToggle">
+            <span
+              ><strong>Read receipts</strong><br /><small class="muted"
+                >Let people see when you've read their messages.</small
+              ></span
+            >
+            <input id="receiptsToggle" type="checkbox" checked />
+          </label>
+          <h3 class="setting-title">Appearance</h3>
+          <div class="seg-row">
+            <button type="button" class="seg" data-theme-choice="dark">
+              Dark
+            </button>
+            <button type="button" class="seg" data-theme-choice="light">
+              Light
+            </button>
+            <button type="button" class="seg" data-theme-choice="system">
+              System
+            </button>
+          </div>
+          <p class="tiny muted">Accent colour</p>
+          <div id="accentRow" class="accent-row"></div>
+          <h3 class="setting-title">Notifications</h3>
+          <label class="setting-row" for="soundToggle">
+            <span
+              ><strong>Message sound</strong><br /><small class="muted"
+                >Play a sound for new messages.</small
+              ></span
+            >
+            <input id="soundToggle" type="checkbox" checked />
+          </label>
+          <label class="setting-row" for="notifyToggle">
+            <span
+              ><strong>Desktop notifications</strong><br /><small class="muted"
+                >Show alerts when ChatSpace is in the background.</small
+              ></span
+            >
+            <input id="notifyToggle" type="checkbox" />
+          </label>
         </div>
       </section>
     </main>

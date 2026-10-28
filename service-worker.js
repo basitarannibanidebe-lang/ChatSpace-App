@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v1";
+const CACHE_NAME = "chatspace-v2";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -53,5 +53,16 @@ self.addEventListener("fetch", (event) => {
           : Response.error())
       );
     }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((list) =>
+        list.length ? list[0].focus() : self.clients.openWindow("/"),
+      ),
   );
 });
