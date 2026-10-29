@@ -1,10 +1,18 @@
-const CACHE_NAME = "chatspace-v2";
+const CACHE_NAME = "chatspace-v3";
 const APP_FILES = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
   "/manifest.json",
+  "/config.js",
+];
+
+// Libraries and fonts the app needs to start while offline.
+const CDN_HOSTS = [
+  "cdn.jsdelivr.net",
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
 ];
 
 self.addEventListener("install", (event) => {
@@ -34,25 +42,36 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);
+  const sameOrigin = url.origin === self.location.origin;
 
   if (
     request.method !== "GET" ||
-    url.origin !== self.location.origin ||
+    (!sameOrigin && !CDN_HOSTS.includes(url.hostname)) ||
     url.pathname.includes("/.netlify/")
   ) {
     return;
   }
 
+  // Online: always get the newest file and keep a copy.
+  // Offline: serve the saved copy.
   event.respondWith(
-    fetch(request).catch(async () => {
-      const cached = await caches.match(request);
-      return (
-        cached ||
-        (request.mode === "navigate"
-          ? caches.match("/index.html")
-          : Response.error())
-      );
-    }),
+    fetch(request)
+      .then((response) => {
+        if (response && (response.ok || response.type === "opaque")) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        return (
+          cached ||
+          (request.mode === "navigate"
+            ? caches.match("/index.html")
+            : Response.error())
+        );
+      }),
   );
 });
 

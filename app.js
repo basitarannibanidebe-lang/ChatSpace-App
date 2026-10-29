@@ -29,6 +29,20 @@
     `${name.toLowerCase()}@users.chatspace.invalid`;
   const cleanUsername = (name) => name.trim().toLowerCase();
   const validUsername = (name) => /^[a-z0-9_-]{3,24}$/.test(name);
+  const SUPA_ORIGIN = (() => {
+    try {
+      return new URL(cfg.SUPABASE_URL).origin;
+    } catch {
+      return "";
+    }
+  })();
+  const okAvatar = (u) => {
+    try {
+      return new URL(u).origin === SUPA_ORIGIN ? u : null;
+    } catch {
+      return null;
+    }
+  };
   const escapeHtml = (s) =>
     String(s).replace(
       /[&<>"']/g,
@@ -42,12 +56,12 @@
         })[c],
     );
   const avatarInner = (p) =>
-    p.avatar_url
+    okAvatar(p.avatar_url)
       ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
       : escapeHtml((peerName(p)[0] || "?").toUpperCase());
   const peerName = (p) => p.display_name || p.username;
   function setAvatar(el, p) {
-    el.innerHTML = p.avatar_url
+    el.innerHTML = okAvatar(p.avatar_url)
       ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
       : escapeHtml((peerName(p)[0] || "?").toUpperCase());
   }
@@ -99,10 +113,12 @@
     $("authMessage").classList.toggle("error", error);
   }
   function showAuth() {
+    document.getElementById("splash")?.classList.add("hidden");
     authScreen.classList.remove("hidden");
     appScreen.classList.add("hidden");
   }
   function showApp() {
+    document.getElementById("splash")?.classList.add("hidden");
     authScreen.classList.add("hidden");
     appScreen.classList.remove("hidden");
   }
@@ -166,6 +182,7 @@
         await loadCurrentProfile();
         showApp();
         await loadChats();
+        flushOutbox();
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
           email: usernameEmail(username),
@@ -190,12 +207,16 @@
   $("authForm").addEventListener("submit", handleAuth);
 
   async function loadCurrentProfile() {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", currentUser.id)
       .maybeSingle();
-    if (error) throw error;
+    if (error) {
+      const saved = cacheGet("profile");
+      if (!saved || saved.id !== currentUser.id) throw error;
+      data = saved;
+    } else if (data) cacheSet("profile", data);
     if (!data) {
       const name = currentUser.user_metadata?.username;
       if (!name)
@@ -226,6 +247,12 @@
       .eq("user_id", currentUser.id)
       .in("conversation_id", conversationIds);
 
+    if (error && cacheGet("prefs")) {
+      return new Map(
+        cacheGet("prefs").map((item) => [item.conversation_id, item]),
+      );
+    }
+    if (!error) cacheSet("prefs", data || []);
     if (error) {
       console.error("Chat preferences:", error.message);
       toast("Couldn't load chat settings: " + error.message);
@@ -272,7 +299,14 @@
   }
 
   async function loadChats() {
-    const { data: rows, error } = await supabase.rpc("get_my_chats");
+    let { data: rows, error } = await supabase.rpc("get_my_chats");
+    if (error) {
+      const saved = cacheGet("chats");
+      if (saved) {
+        rows = saved;
+        error = null;
+      }
+    } else cacheSet("chats", rows);
     if (error) {
       toast("Couldn't load chats: " + error.message);
       return;
@@ -320,12 +354,13 @@
 
     lastPeers = allPeers;
     const recentPeers = allPeers.filter(
-      (peer) => !peer.preferences.is_archived,
+      (peer) => !peer.preferences.is_archived && !peer.preferences.is_locked,
     );
 
     const archivedPeers = allPeers.filter(
-      (peer) => peer.preferences.is_archived,
+      (peer) => peer.preferences.is_archived && !peer.preferences.is_locked,
     );
+    const lockedPeers = allPeers.filter((peer) => peer.preferences.is_locked);
 
     $("archivedCount").textContent = archivedPeers.length;
     $("archivedCount").classList.toggle("hidden", archivedPeers.length === 0);
@@ -342,12 +377,23 @@
       "You have no archived chats.",
     );
 
-    $("chatList").classList.toggle("hidden", showingArchivedChats);
-    $("archivedChatList").classList.toggle("hidden", !showingArchivedChats);
+    $("lockedDot").classList.toggle(
+      "hidden",
+      !lockedPeers.some((p) => p.unread),
+    );
+    if (lockUnlocked || !appSettings.chat_lock_hash)
+      renderChatList(
+        $("lockedChatList"),
+        lockedPeers,
+        "Chats you lock appear here. Open a chat's ⋮ menu and choose Lock chat.",
+      );
+    else
+      $("lockedChatList").innerHTML =
+        '<p class="tiny muted" style="padding:8px">🔒 Tap the Locked tab and enter your PIN to see these chats.</p>';
 
-    $("recentChatsBtn").classList.toggle("active", !showingArchivedChats);
-
-    $("archivedChatsBtn").classList.toggle("active", showingArchivedChats);
+    setListView(
+      showingLocked ? "locked" : showingArchivedChats ? "archived" : "recent",
+    );
   }
 
   function renderChatList(list, peers, emptyMessage) {
@@ -453,6 +499,7 @@
       peer.isGroup
         ? ["Leave group", "leave"]
         : [blockedIds.has(peer.id) ? "Unblock user" : "Block user", "block"],
+      [prefs.is_locked ? "Unlock chat" : "Lock chat", "lock"],
       ["Change wallpaper", "wallpaper"],
       ["Delete chat from my list", "delete"],
     ];
@@ -492,6 +539,20 @@
             });
 
             toast(prefs.is_muted ? "Chat unmuted." : "Chat muted.");
+          }
+
+          if (action === "lock") {
+            if (!prefs.is_locked && !(await ensurePinSet())) return;
+            await saveChatPreference(peer.conversationId, {
+              is_locked: !prefs.is_locked,
+            });
+            if (!prefs.is_locked && activeConversation === peer.conversationId)
+              closeActiveChat();
+            toast(
+              prefs.is_locked
+                ? "Chat unlocked."
+                : "Chat locked. Find it in the Locked tab.",
+            );
           }
 
           if (action === "wallpaper") {
@@ -636,6 +697,9 @@
       (r) => !r.is_group && r.peer_id === peer.id,
     );
     if (existing) {
+      peer.preferences = lastPeers.find(
+        (p) => p.conversationId === existing.conversation_id,
+      )?.preferences;
       await openConversation(peer, existing.conversation_id);
       return;
     }
@@ -654,6 +718,12 @@
   }
 
   async function openConversation(peer, conversationId) {
+    if (
+      peer.preferences?.is_locked &&
+      appSettings.chat_lock_hash &&
+      !(await unlockLocked())
+    )
+      return;
     showView("messages");
     activePeer = peer;
     activeConversation = conversationId;
@@ -757,6 +827,7 @@
   async function loadMessages() {
     if (activePeer?.isGroup && groupMembersFor !== activeConversation)
       await loadGroupMembers();
+    if (!navigator.onLine) return loadMessagesOffline();
     $("messages").innerHTML = "";
     messageCache.clear();
 
@@ -790,6 +861,7 @@
     }
 
     await resolveAttachments(data || []);
+    cacheMessages(activeConversation, data || [], [...hiddenIds]);
 
     // Cache every loaded message so replies can still find their originals.
     for (const msg of data || []) {
@@ -805,6 +877,7 @@
       renderMessage(msg);
     }
 
+    renderPendingFor(activeConversation);
     scrollMessages();
   }
   // =========================================
@@ -1153,9 +1226,20 @@
     }
 
     if (msg.attachment_url) {
-      const url = escapeHtml(msg.attachment_url);
+      let raw = "";
+      try {
+        const u = new URL(msg.attachment_url);
+        if (
+          u.protocol === "https:" &&
+          (msg.attachment_type === "image" || u.origin === SUPA_ORIGIN)
+        )
+          raw = u.href;
+      } catch {}
+      const url = escapeHtml(raw);
 
-      if (msg.attachment_type === "audio") {
+      if (!raw) {
+        body += '<div class="tiny muted">Attachment unavailable</div>';
+      } else if (msg.attachment_type === "audio") {
         body += `
     <audio
       class="audio-player"
@@ -1222,6 +1306,7 @@
       const tick = document.createElement("span");
       tick.className = "tick";
       tick.dataset.ts = msg.created_at;
+      if (msg.pending) tick.dataset.pending = "1";
       setTick(tick);
       meta.appendChild(tick);
     }
@@ -1532,6 +1617,10 @@
       return;
     }
     if (!content.trim() && !attachment) return;
+    if (attachment && !navigator.onLine) {
+      toast("Photos, files and voice notes need an internet connection.");
+      return;
+    }
     let attachmentPathValue = null,
       attachmentUrl = null,
       finalContent = content.trim();
@@ -1569,6 +1658,7 @@
       if (attachmentType !== "audio")
         finalContent = attachment.name || "Shared file";
     }
+    if (!attachment && !navigator.onLine) return queueMessage(finalContent);
     const { error } = await supabase.from("messages").insert({
       conversation_id: activeConversation,
       sender_id: currentUser.id,
@@ -1578,6 +1668,8 @@
       attachment_type: attachment ? attachmentType : null,
       reply_to: replyingToMessage?.id || null,
     });
+    if (error && !attachment && isNetworkError(error))
+      return queueMessage(finalContent);
     if (error) {
       toast(
         error.code === "42501"
@@ -1622,6 +1714,739 @@
     } finally {
       $("sendBtn").disabled = false;
     }
+  });
+
+  // ---- Offline support: saved copy, waiting messages, banner ----
+  const CS = "cs:";
+  function cacheGet(k) {
+    try {
+      return JSON.parse(localStorage.getItem(CS + k));
+    } catch {
+      return null;
+    }
+  }
+  function cacheSet(k, v) {
+    try {
+      localStorage.setItem(CS + k, JSON.stringify(v));
+    } catch {
+      try {
+        (cacheGet("msgkeys") || []).forEach((x) =>
+          localStorage.removeItem(CS + "msgs:" + x),
+        );
+        localStorage.setItem(CS + "msgkeys", "[]");
+      } catch {}
+    }
+  }
+  function clearOfflineCache() {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith(CS))
+      .forEach((k) => localStorage.removeItem(k));
+  }
+  function cacheMessages(convId, messages, hidden) {
+    cacheSet("msgs:" + convId, { messages: messages.slice(-80), hidden });
+    const keys = (cacheGet("msgkeys") || []).filter((k) => k !== convId);
+    keys.push(convId);
+    while (keys.length > 15)
+      localStorage.removeItem(CS + "msgs:" + keys.shift());
+    cacheSet("msgkeys", keys);
+  }
+  const isNetworkError = (e) =>
+    !e.code && /fetch|network|load failed/i.test(e.message || "");
+
+  async function loadMessagesOffline() {
+    $("messages").innerHTML = "";
+    messageCache.clear();
+    const saved = cacheGet("msgs:" + activeConversation);
+    if (!saved)
+      toast("You're offline, and this chat isn't saved on this device yet.");
+    for (const msg of saved?.messages || []) {
+      messageCache.set(String(msg.id), msg);
+      if (!(saved.hidden || []).includes(String(msg.id))) renderMessage(msg);
+    }
+    renderPendingFor(activeConversation);
+    scrollMessages();
+  }
+
+  // Messages typed while offline wait here, then send themselves.
+  let outbox = cacheGet("outbox") || [];
+  let flushing = false;
+  const saveOutbox = () => cacheSet("outbox", outbox);
+  function renderPendingFor(conversationId) {
+    for (const item of outbox)
+      if (item.conversation_id === conversationId)
+        renderMessage({
+          ...item,
+          is_edited: false,
+          deleted_for_everyone: false,
+          pending: true,
+        });
+  }
+  function queueMessage(text) {
+    const item = {
+      id: crypto.randomUUID(),
+      conversation_id: activeConversation,
+      sender_id: currentUser.id,
+      content: text,
+      reply_to: replyingToMessage?.id || null,
+      created_at: new Date().toISOString(),
+    };
+    outbox.push(item);
+    saveOutbox();
+    cancelReply();
+    renderMessage({
+      ...item,
+      is_edited: false,
+      deleted_for_everyone: false,
+      pending: true,
+    });
+    scrollMessages();
+    updateOfflineBanner();
+  }
+  async function flushOutbox() {
+    if (flushing || !outbox.length || !navigator.onLine || !currentUser?.id)
+      return;
+    flushing = true;
+    try {
+      for (const item of [...outbox]) {
+        const { error } = await supabase.from("messages").insert({
+          id: item.id,
+          conversation_id: item.conversation_id,
+          sender_id: item.sender_id,
+          content: item.content,
+          reply_to: item.reply_to,
+        });
+        if (error && error.code !== "23505") {
+          if (isNetworkError(error)) break;
+          toast("A waiting message couldn't be sent: " + error.message);
+        }
+        outbox = outbox.filter((x) => x.id !== item.id);
+        saveOutbox();
+      }
+    } finally {
+      flushing = false;
+    }
+    updateOfflineBanner();
+    if (activeConversation) await loadMessages();
+    loadChats();
+  }
+
+  function updateOfflineBanner() {
+    let bar = $("offlineBanner");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "offlineBanner";
+      bar.className = "offline-banner hidden";
+      document.body.appendChild(bar);
+    }
+    const waiting = outbox.length
+      ? ` ${outbox.length} message${outbox.length > 1 ? "s" : ""} waiting.`
+      : "";
+    if (!navigator.onLine)
+      bar.textContent =
+        "You're offline. You can read saved chats and write messages." +
+        waiting;
+    else bar.textContent = "Back online. Sending" + waiting;
+    bar.classList.toggle("hidden", navigator.onLine && !outbox.length);
+  }
+  window.addEventListener("offline", updateOfflineBanner);
+  window.addEventListener("online", async () => {
+    updateOfflineBanner();
+    if (!currentUser?.id) return;
+    const { data } = await supabase.auth.getSession();
+    if (!data?.session) {
+      showAuth();
+      authMessage("Please log in again to keep chatting.", true);
+      return;
+    }
+    await flushOutbox();
+    loadChats();
+    if (activeConversation) loadMessages();
+  });
+  setInterval(() => outbox.length && flushOutbox(), 20000);
+  updateOfflineBanner();
+
+  // ---- Calls: one-to-one voice and video ----
+  let call = null,
+    callChannel = null,
+    ringTimer = null,
+    iceCache = null;
+  const FALLBACK_ICE = [
+    { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:stun.l.google.com:19302" },
+  ];
+  async function getIceServers() {
+    if (iceCache && Date.now() < iceCache.exp) return iceCache.servers;
+    try {
+      const res = await fetch("/api/ice", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const servers = [].concat(data.iceServers || []);
+        if (servers.length) {
+          iceCache = { servers, exp: Date.now() + 3600e3 };
+          return servers;
+        }
+      }
+    } catch {}
+    return FALLBACK_ICE;
+  }
+  const fmtDuration = (s) =>
+    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const mediaError = (e) =>
+    e?.name === "NotAllowedError"
+      ? "Allow microphone and camera access in your browser to make calls."
+      : "Couldn't start your microphone or camera.";
+
+  async function rawSignal(row) {
+    const { error } = await supabase
+      .from("call_signals")
+      .insert({ from_user: currentUser.id, ...row });
+    if (error) console.error("Call signal:", error.message);
+  }
+  const sendSignal = (kind, payload = null) =>
+    call &&
+    rawSignal({
+      conversation_id: call.conversationId,
+      call_id: call.id,
+      to_user: call.peerId,
+      kind,
+      media: call.media,
+      payload,
+    });
+
+  function startRing() {
+    stopRing();
+    beep();
+    ringTimer = setInterval(() => {
+      beep();
+      setTimeout(beep, 350);
+      if (call?.role === "callee") navigator.vibrate?.([300, 150, 300]);
+    }, 2200);
+  }
+  function stopRing() {
+    clearInterval(ringTimer);
+    ringTimer = null;
+  }
+
+  function showCallScreen(status) {
+    document.getElementById("incomingCall")?.remove();
+    document.getElementById("callScreen")?.remove();
+    const el = document.createElement("div");
+    el.id = "callScreen";
+    el.className =
+      "call-screen " + (call.media === "video" ? "video" : "voice");
+    el.innerHTML = `<video id="remoteVideo" class="call-remote" autoplay playsinline></video>
+      <div class="call-info">
+        <div id="callAvatar" class="user-avatar xl call-avatar"></div>
+        <h2 id="callName"></h2>
+        <p id="callStatus"></p>
+      </div>
+      <video id="localVideo" class="call-local ${call.media === "video" ? "" : "hidden"}" autoplay playsinline muted></video>
+      <div class="call-controls">
+        <button type="button" id="callMute" class="call-btn" aria-label="Mute microphone">🎤</button>
+        <button type="button" id="callCam" class="call-btn ${call.media === "video" ? "" : "hidden"}" aria-label="Turn camera off">📷</button>
+        <button type="button" id="callEnd" class="call-btn end" aria-label="End call">✕</button>
+      </div>`;
+    document.body.appendChild(el);
+    setAvatar($("callAvatar"), call.peer);
+    $("callName").textContent = call.peer.preferences?.is_locked
+      ? "Someone"
+      : peerName(call.peer);
+    $("callStatus").textContent = status;
+    if (call.media === "video") $("localVideo").srcObject = call.local;
+    $("callEnd").addEventListener("click", () => endCall("hangup"));
+    $("callMute").addEventListener("click", () => {
+      const track = call.local.getAudioTracks()[0];
+      if (!track) return;
+      track.enabled = !track.enabled;
+      $("callMute").textContent = track.enabled ? "🎤" : "🔇";
+      $("callMute").classList.toggle("off", !track.enabled);
+    });
+    $("callCam").addEventListener("click", () => {
+      const track = call.local.getVideoTracks()[0];
+      if (!track) return;
+      track.enabled = !track.enabled;
+      $("callCam").classList.toggle("off", !track.enabled);
+    });
+  }
+  const setCallStatus = (t) =>
+    document.getElementById("callStatus") && ($("callStatus").textContent = t);
+
+  async function getMedia(media) {
+    return navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: media === "video" ? { facingMode: "user" } : false,
+    });
+  }
+  async function createPeer() {
+    const pc = new RTCPeerConnection({ iceServers: await getIceServers() });
+    call.pc = pc;
+    call.local.getTracks().forEach((t) => pc.addTrack(t, call.local));
+    pc.onicecandidate = (e) =>
+      e.candidate && sendSignal("ice", e.candidate.toJSON());
+    pc.ontrack = (e) => {
+      $("remoteVideo").srcObject = e.streams[0];
+      $("remoteVideo")
+        .play?.()
+        .catch(() => {});
+    };
+    pc.onconnectionstatechange = () => {
+      if (!call) return;
+      const s = pc.connectionState;
+      clearTimeout(call.discTimer);
+      if (s === "connected") onCallConnected();
+      else if (s === "failed") endCall("failed");
+      else if (s === "disconnected")
+        call.discTimer = setTimeout(
+          () => call && pc.connectionState !== "connected" && endCall("failed"),
+          8000,
+        );
+    };
+    return pc;
+  }
+  function onCallConnected() {
+    if (call.state === "connected") return;
+    call.state = "connected";
+    call.startedAt = Date.now();
+    clearTimeout(call.ringTimeout);
+    stopRing();
+    document.getElementById("callScreen")?.classList.add("connected");
+    setCallStatus("0:00");
+    call.timer = setInterval(
+      () =>
+        setCallStatus(
+          fmtDuration(Math.floor((Date.now() - call.startedAt) / 1000)),
+        ),
+      1000,
+    );
+  }
+  async function flushIce() {
+    for (const c of call.pendingIce.splice(0)) {
+      try {
+        await call.pc.addIceCandidate(c);
+      } catch {}
+    }
+  }
+
+  async function startCall(media) {
+    if (call) return toast("You're already in a call.");
+    if (!navigator.onLine) return toast("Calls need an internet connection.");
+    if (!activePeer || activePeer.isGroup) return;
+    if (blockedIds.has(activePeer.id))
+      return toast("Unblock this person to call them.");
+    if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection)
+      return toast("Calls aren't supported in this browser.");
+    call = {
+      id: crypto.randomUUID(),
+      conversationId: activeConversation,
+      peerId: activePeer.id,
+      peer: activePeer,
+      media,
+      role: "caller",
+      state: "ringing",
+      pendingIce: [],
+    };
+    try {
+      call.local = await getMedia(media);
+    } catch (e) {
+      call = null;
+      return toast(mediaError(e));
+    }
+    showCallScreen("Calling…");
+    startRing();
+    call.ringTimeout = setTimeout(() => endCall("noanswer"), 45000);
+    await sendSignal("invite");
+  }
+
+  function onInvite(row) {
+    if (call) {
+      rawSignal({
+        conversation_id: row.conversation_id,
+        call_id: row.call_id,
+        to_user: row.from_user,
+        kind: "decline",
+        media: row.media,
+        payload: { busy: true },
+      });
+      return;
+    }
+    const peer = lastPeers.find(
+      (p) => p.conversationId === row.conversation_id && !p.isGroup,
+    );
+    if (!peer || blockedIds.has(row.from_user)) return;
+    call = {
+      id: row.call_id,
+      conversationId: row.conversation_id,
+      peerId: row.from_user,
+      peer,
+      media: row.media === "video" ? "video" : "voice",
+      role: "callee",
+      state: "ringing",
+      pendingIce: [],
+    };
+    const name = peer.preferences?.is_locked ? "Someone" : peerName(peer);
+    const box = document.createElement("div");
+    box.id = "incomingCall";
+    box.className = "incoming-call";
+    box.innerHTML = `<div class="user-avatar xl" id="incomingAvatar"></div>
+      <h2>${escapeHtml(name)}</h2>
+      <p class="muted">Incoming ${call.media} call…</p>
+      <div class="call-controls">
+        <button type="button" class="call-btn end" id="incomingDecline" aria-label="Decline">✕</button>
+        <button type="button" class="call-btn accept" id="incomingAccept" aria-label="Accept">✓</button>
+      </div>`;
+    document.body.appendChild(box);
+    setAvatar($("incomingAvatar"), peer);
+    $("incomingDecline").addEventListener("click", () => endCall("declined"));
+    $("incomingAccept").addEventListener("click", acceptCall);
+    startRing();
+    call.ringTimeout = setTimeout(() => endCall("missed", false), 45000);
+    if (
+      document.hidden &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    )
+      navigator.serviceWorker?.ready
+        .then((reg) =>
+          reg.showNotification("Incoming call", {
+            body: name,
+            tag: "call",
+            requireInteraction: true,
+            icon: "/icons/icon-192.png",
+          }),
+        )
+        .catch(() => {});
+  }
+  async function acceptCall() {
+    if (!call) return;
+    stopRing();
+    clearTimeout(call.ringTimeout);
+    try {
+      call.local = await getMedia(call.media);
+    } catch (e) {
+      toast(mediaError(e));
+      return endCall("declined");
+    }
+    showCallScreen("Connecting…");
+    await createPeer();
+    await sendSignal("accept");
+  }
+
+  async function handleSignal(row) {
+    if (Date.now() - new Date(row.created_at) > 60000) return;
+    if (row.kind === "invite") return onInvite(row);
+    if (!call || call.id !== row.call_id) return;
+    try {
+      if (row.kind === "accept" && call.role === "caller") {
+        clearTimeout(call.ringTimeout);
+        stopRing();
+        setCallStatus("Connecting…");
+        const pc = await createPeer();
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendSignal("offer", { type: offer.type, sdp: offer.sdp });
+      } else if (row.kind === "offer" && call.role === "callee" && call.pc) {
+        await call.pc.setRemoteDescription(row.payload);
+        await flushIce();
+        const answer = await call.pc.createAnswer();
+        await call.pc.setLocalDescription(answer);
+        await sendSignal("answer", { type: answer.type, sdp: answer.sdp });
+      } else if (row.kind === "answer" && call.role === "caller" && call.pc) {
+        await call.pc.setRemoteDescription(row.payload);
+        await flushIce();
+      } else if (row.kind === "ice") {
+        if (call.pc?.remoteDescription)
+          await call.pc.addIceCandidate(row.payload).catch(() => {});
+        else call.pendingIce.push(row.payload);
+      } else if (row.kind === "decline") {
+        endCall(row.payload?.busy ? "busy" : "declined", false);
+      } else if (row.kind === "hangup") {
+        endCall(
+          call.state === "ringing" && call.role === "callee"
+            ? "missed"
+            : "remote",
+          false,
+        );
+      }
+    } catch (err) {
+      console.error("Call error:", err);
+      endCall("failed");
+    }
+  }
+
+  async function endCall(reason, notify = true) {
+    if (!call) return;
+    const c = call;
+    call = null;
+    clearTimeout(c.ringTimeout);
+    clearTimeout(c.discTimer);
+    clearInterval(c.timer);
+    stopRing();
+    c.pc?.close();
+    c.local?.getTracks().forEach((t) => t.stop());
+    document.getElementById("callScreen")?.remove();
+    document.getElementById("incomingCall")?.remove();
+    const seconds = c.startedAt
+      ? Math.floor((Date.now() - c.startedAt) / 1000)
+      : 0;
+    if (notify && reason !== "logout")
+      await rawSignal({
+        conversation_id: c.conversationId,
+        call_id: c.id,
+        to_user: c.peerId,
+        kind:
+          c.state === "ringing" && c.role === "callee" ? "decline" : "hangup",
+        media: c.media,
+      });
+    const kindLabel = c.media === "video" ? "video" : "voice";
+    const notes = {
+      failed: "Call failed. Check your connection and try again.",
+      busy: "They're on another call.",
+      declined: "Call declined.",
+      noanswer: "No answer.",
+      missed: "Missed " + kindLabel + " call from " + peerName(c.peer) + ".",
+    };
+    if (
+      notes[reason] && reason !== "failed"
+        ? c.role === "caller" || reason === "missed"
+        : reason === "failed"
+    )
+      toast(notes[reason]);
+    // The caller leaves a line in the chat as a call history entry.
+    if (c.role === "caller" && reason !== "logout") {
+      const label =
+        c.state === "connected"
+          ? `📞 ${kindLabel} call · ${fmtDuration(seconds)}`
+          : reason === "declined" || reason === "busy"
+            ? `📞 ${kindLabel} call declined`
+            : `📞 Missed ${kindLabel} call`;
+      await supabase
+        .from("messages")
+        .insert({
+          conversation_id: c.conversationId,
+          sender_id: currentUser.id,
+          content: label,
+        });
+      if (activeConversation === c.conversationId) await loadMessages();
+      loadChats();
+    }
+    supabase
+      .from("call_signals")
+      .delete()
+      .eq("call_id", c.id)
+      .eq("from_user", currentUser?.id || "");
+  }
+
+  function startCallListener() {
+    if (callChannel || !currentUser?.id) return;
+    callChannel = supabase
+      .channel("calls-" + currentUser.id)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "call_signals",
+          filter: `to_user=eq.${currentUser.id}`,
+        },
+        (payload) => handleSignal(payload.new),
+      )
+      .subscribe();
+    supabase.rpc("purge_old_call_signals");
+  }
+  function stopCallListener() {
+    if (callChannel) supabase.removeChannel(callChannel);
+    callChannel = null;
+  }
+  $("voiceCallBtn").addEventListener("click", () => startCall("voice"));
+  $("videoCallBtn").addEventListener("click", () => startCall("video"));
+
+  // ---- Chat lock (PIN) ----
+  let lockUnlocked = false,
+    showingLocked = false,
+    lockTimer = null,
+    pinFails = 0,
+    pinBlockedUntil = 0;
+  const bytesToB64 = (u8) => btoa(String.fromCharCode(...u8));
+  const b64ToBytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  async function hashPin(pin, saltB64) {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(pin),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
+    );
+    const bits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        salt: b64ToBytes(saltB64),
+        iterations: 150000,
+        hash: "SHA-256",
+      },
+      key,
+      256,
+    );
+    return bytesToB64(new Uint8Array(bits));
+  }
+  const verifyPin = async (pin) =>
+    (await hashPin(pin, appSettings.chat_lock_salt)) ===
+    appSettings.chat_lock_hash;
+
+  function pinDialog({ title, text = "", forgot = false }) {
+    return new Promise((resolve) => {
+      const back = document.createElement("div");
+      back.className = "pin-backdrop";
+      back.innerHTML = `<div class="pin-box" role="dialog" aria-modal="true">
+        <h3>${escapeHtml(title)}</h3>
+        ${text ? `<p class="tiny muted">${escapeHtml(text)}</p>` : ""}
+        <input class="pin-input" type="password" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="••••" aria-label="PIN" />
+        <p class="tiny pin-error"></p>
+        <div class="pin-actions">
+          <button type="button" class="ghost-btn" data-p="cancel">Cancel</button>
+          <button type="button" class="primary-btn" data-p="ok">OK</button>
+        </div>
+        ${forgot ? '<button type="button" class="link-btn" data-p="forgot">Forgot PIN?</button>' : ""}
+      </div>`;
+      document.body.appendChild(back);
+      const input = back.querySelector(".pin-input");
+      input.focus();
+      const done = (v) => {
+        back.remove();
+        resolve(v);
+      };
+      const submit = () => {
+        if (input.value.length < 4)
+          back.querySelector(".pin-error").textContent =
+            "PIN must be 4 to 6 digits.";
+        else done(input.value);
+      };
+      input.addEventListener(
+        "input",
+        () => (input.value = input.value.replace(/\D/g, "")),
+      );
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submit();
+        if (e.key === "Escape") done(null);
+      });
+      back.querySelector('[data-p="ok"]').onclick = submit;
+      back.querySelector('[data-p="cancel"]').onclick = () => done(null);
+      back
+        .querySelector('[data-p="forgot"]')
+        ?.addEventListener("click", () => done("__forgot__"));
+    });
+  }
+  async function checkPinFlow(title = "Enter your PIN") {
+    if (Date.now() < pinBlockedUntil) {
+      toast("Too many wrong tries. Wait 30 seconds.");
+      return false;
+    }
+    const pin = await pinDialog({ title, forgot: true });
+    if (pin === null) return false;
+    if (pin === "__forgot__") {
+      if (
+        window.confirm(
+          "Resetting removes your PIN and unlocks ALL locked chats. Continue?",
+        )
+      ) {
+        await clearPin();
+        toast("PIN reset. Your chats are unlocked.");
+      }
+      return false;
+    }
+    if (await verifyPin(pin)) {
+      pinFails = 0;
+      return true;
+    }
+    if (++pinFails >= 5) {
+      pinBlockedUntil = Date.now() + 30000;
+      pinFails = 0;
+    }
+    toast("Wrong PIN.");
+    return false;
+  }
+  async function unlockLocked() {
+    if (lockUnlocked || !appSettings.chat_lock_hash) return true;
+    lockUnlocked = await checkPinFlow();
+    return lockUnlocked;
+  }
+  async function setPinFlow() {
+    if (
+      appSettings.chat_lock_hash &&
+      !(await checkPinFlow("Enter your current PIN"))
+    )
+      return false;
+    const first = await pinDialog({
+      title: "Choose a PIN",
+      text: "4 to 6 digits.",
+    });
+    if (first === null) return false;
+    const second = await pinDialog({ title: "Confirm your PIN" });
+    if (second === null) return false;
+    if (first !== second) {
+      toast("The PINs didn't match.");
+      return false;
+    }
+    const prev = {
+      chat_lock_hash: appSettings.chat_lock_hash,
+      chat_lock_salt: appSettings.chat_lock_salt,
+    };
+    const salt = bytesToB64(crypto.getRandomValues(new Uint8Array(16)));
+    const ok = await saveSetting({
+      chat_lock_hash: await hashPin(first, salt),
+      chat_lock_salt: salt,
+    });
+    if (!ok) appSettings = { ...appSettings, ...prev };
+    else toast("PIN saved.");
+    return ok;
+  }
+  const ensurePinSet = async () =>
+    Boolean(appSettings.chat_lock_hash) || (await setPinFlow());
+  async function clearPin() {
+    await supabase
+      .from("chat_preferences")
+      .update({ is_locked: false })
+      .eq("user_id", currentUser.id)
+      .eq("is_locked", true);
+    await saveSetting({ chat_lock_hash: null, chat_lock_salt: null });
+    lockUnlocked = false;
+    loadChats();
+  }
+  function relock() {
+    lockUnlocked = false;
+    clearTimeout(lockTimer);
+    if (activePeer?.preferences?.is_locked) closeActiveChat();
+    if (showingLocked) setListView("recent");
+    loadChats();
+  }
+  function setListView(view) {
+    showingArchivedChats = view === "archived";
+    showingLocked = view === "locked";
+    $("chatList").classList.toggle("hidden", view !== "recent");
+    $("archivedChatList").classList.toggle("hidden", view !== "archived");
+    $("lockedChatList").classList.toggle("hidden", view !== "locked");
+    $("recentChatsBtn").classList.toggle("active", view === "recent");
+    $("archivedChatsBtn").classList.toggle("active", view === "archived");
+    $("lockedChatsBtn").classList.toggle("active", view === "locked");
+    $("lockNowBtn").classList.toggle(
+      "hidden",
+      !(view === "locked" && lockUnlocked && appSettings.chat_lock_hash),
+    );
+  }
+  // Chats re-lock a minute after you leave the app.
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(lockTimer);
+    if (document.hidden && lockUnlocked) lockTimer = setTimeout(relock, 60000);
+  });
+  $("pinSetBtn").addEventListener("click", async () => {
+    await setPinFlow();
+    renderSettingsUi();
+  });
+  $("pinRemoveBtn").addEventListener("click", async () => {
+    if (!(await checkPinFlow("Enter your current PIN"))) return;
+    if (!window.confirm("Remove your PIN? All locked chats will be unlocked."))
+      return;
+    await clearPin();
+    toast("PIN removed.");
   });
 
   // ---- Groups, New chat, chat search ----
@@ -2055,8 +2880,11 @@
     const p = { ...peer, ...(data || {}) };
     profilePeer = p;
     setAvatar($("peerProfileAvatar"), p);
-    $("peerProfileAvatar").dataset.url = p.avatar_url || "";
-    $("peerProfileAvatar").classList.toggle("clickable", Boolean(p.avatar_url));
+    $("peerProfileAvatar").dataset.url = okAvatar(p.avatar_url) || "";
+    $("peerProfileAvatar").classList.toggle(
+      "clickable",
+      Boolean(okAvatar(p.avatar_url)),
+    );
     $("peerProfileName").textContent = peerName(p);
     $("peerProfileUser").textContent = "@" + p.username;
     const status = presenceText(p.id, p.last_seen_at);
@@ -2430,6 +3258,12 @@
 
   $("logoutBtn").addEventListener("click", async () => {
     stopPresence();
+    endCall("logout");
+    stopCallListener();
+    lockUnlocked = false;
+    clearOfflineCache();
+    outbox = [];
+    updateOfflineBanner();
     if (listChannel) {
       supabase.removeChannel(listChannel);
       listChannel = null;
@@ -2504,27 +3338,17 @@
 
     await startConversation(data);
   });
-  $("recentChatsBtn").addEventListener("click", () => {
-    showingArchivedChats = false;
-
-    $("recentChatsBtn").classList.add("active");
-    $("archivedChatsBtn").classList.remove("active");
-
-    $("chatList").classList.remove("hidden");
-    $("archivedChatList").classList.add("hidden");
-  });
-
+  $("recentChatsBtn").addEventListener("click", () => setListView("recent"));
   $("archivedChatsBtn").addEventListener("click", async () => {
-    showingArchivedChats = true;
-
-    $("recentChatsBtn").classList.remove("active");
-    $("archivedChatsBtn").classList.add("active");
-
-    $("chatList").classList.add("hidden");
-    $("archivedChatList").classList.remove("hidden");
-
+    setListView("archived");
     await loadChats();
   });
+  $("lockedChatsBtn").addEventListener("click", async () => {
+    if (!(await unlockLocked())) return;
+    setListView("locked");
+    await loadChats();
+  });
+  $("lockNowBtn").addEventListener("click", () => relock());
 
   // ---- Navigation and profile page ----
   function showView(view) {
@@ -2609,6 +3433,10 @@
     lastTypingSent = 0;
 
   function setTick(el) {
+    if (el.dataset.pending) {
+      el.textContent = " 🕒";
+      return;
+    }
     const read = peerReadAt && new Date(el.dataset.ts) <= peerReadAt;
     el.textContent = read ? " ✓✓" : " ✓";
     el.classList.toggle("read", Boolean(read));
@@ -2658,6 +3486,10 @@
     if (typingChannel) supabase.removeChannel(typingChannel);
     applyBlockState();
     applyWallpaper(activePeer?.preferences?.wallpaper);
+    $("callActions").classList.toggle(
+      "hidden",
+      !activePeer || activePeer.isGroup,
+    );
     peerLastSeen = null;
     if (activePeer && !activePeer.isGroup)
       loadPeerPresence(activePeer.id).then(refreshPeerStatus);
@@ -2752,9 +3584,14 @@
       .select("*")
       .eq("user_id", currentUser.id)
       .maybeSingle();
-    if (data) appSettings = { ...appSettings, ...data };
+    if (data) {
+      appSettings = { ...appSettings, ...data };
+      cacheSet("settings", data);
+    } else if (cacheGet("settings"))
+      appSettings = { ...appSettings, ...cacheGet("settings") };
     applyAppearance();
     startPresence();
+    startCallListener();
   }
   async function saveSetting(changes) {
     appSettings = { ...appSettings, ...changes };
@@ -2787,6 +3624,10 @@
       );
     $("soundToggle").checked = appSettings.notification_sound;
     $("lastSeenToggle").checked = appSettings.show_last_seen !== false;
+    const hasPin = Boolean(appSettings.chat_lock_hash);
+    $("pinStatus").textContent = hasPin ? "A PIN is set." : "No PIN set yet.";
+    $("pinSetBtn").textContent = hasPin ? "Change PIN" : "Set PIN";
+    $("pinRemoveBtn").classList.toggle("hidden", !hasPin);
     $("notifyToggle").checked =
       appSettings.notifications_enabled &&
       "Notification" in window &&
@@ -2860,8 +3701,9 @@
     );
     if (peer?.preferences?.is_muted) return;
     if (appSettings.notification_sound) beep();
-    const title = peer ? peerName(peer) : "New message";
-    const body = msg.content || "Sent an attachment";
+    const locked = Boolean(peer?.preferences?.is_locked);
+    const title = locked ? "ChatSpace" : peer ? peerName(peer) : "New message";
+    const body = locked ? "New message" : msg.content || "Sent an attachment";
     const canPopup =
       appSettings.notifications_enabled &&
       "Notification" in window &&
@@ -2917,6 +3759,15 @@
     document.body.appendChild(box);
   }
 
+  // Safety net: if startup stalls, show the login screen rather than a blank page.
+  setTimeout(() => {
+    if (
+      authScreen.classList.contains("hidden") &&
+      appScreen.classList.contains("hidden")
+    )
+      showAuth();
+  }, 8000);
+
   async function init() {
     if (!configReady) {
       showAuth();
@@ -2926,6 +3777,7 @@
       return;
     }
     if (!window.supabase?.createClient) {
+      showAuth();
       authMessage(
         "Could not load Supabase client. Check your internet connection.",
       );
@@ -2940,6 +3792,21 @@
     } = await supabase.auth.getSession();
     if (session) {
       currentUser = session.user;
+      cacheSet("user", {
+        id: session.user.id,
+        user_metadata: session.user.user_metadata,
+      });
+      try {
+        await loadCurrentProfile();
+        showApp();
+        await loadChats();
+      } catch (e) {
+        showAuth();
+        authMessage(e.message, true);
+      }
+    } else if (!navigator.onLine && cacheGet("user")) {
+      // Offline start: open the app from what is saved on this device.
+      currentUser = cacheGet("user");
       try {
         await loadCurrentProfile();
         showApp();

@@ -32,8 +32,6 @@
 ========================================= */
 
 * {
-  padding: none;
-  margin: none;
   box-sizing: border-box;
 }
 
@@ -2917,4 +2915,276 @@ body > .chat-context-menu {
     sans-serif;
   color: var(--accent);
   margin-bottom: 3px;
+}
+
+/* ---- Offline banner ---- */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 120;
+  padding: 8px 14px;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  text-align: center;
+  font:
+    600 13px "DM Sans",
+    sans-serif;
+  color: #fff;
+  background: #b45309;
+  animation: fadeIn 0.2s ease both;
+}
+.offline-banner.hidden {
+  display: none;
+}
+
+/* ---- Start-up splash (shown instead of the login page while the saved login loads) ---- */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+}
+.splash.hidden {
+  display: none;
+}
+.splash-logo {
+  font:
+    800 28px "Manrope",
+    sans-serif;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+.splash-spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- Locked tab and PIN dialog ---- */
+.chat-list-tabs {
+  display: flex;
+  gap: 6px;
+}
+.chat-list-tab {
+  flex: 1;
+  white-space: nowrap;
+  padding-inline: 8px;
+  font-size: 13px;
+}
+#lockNowBtn {
+  margin: 6px 0;
+  align-self: flex-start;
+}
+#lockNowBtn.hidden,
+#lockedChatList.hidden {
+  display: none;
+}
+.pin-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.15s ease both;
+}
+.pin-box {
+  width: min(92vw, 340px);
+  padding: 22px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+  animation: popIn 0.2s ease both;
+}
+.pin-box h3 {
+  margin: 0;
+}
+.pin-input {
+  text-align: center;
+  font-size: 26px;
+  letter-spacing: 10px;
+  padding: 12px;
+}
+.pin-error {
+  color: #ef4444;
+  min-height: 16px;
+  margin: 0;
+}
+.pin-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.link-btn {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font:
+    600 13px "DM Sans",
+    sans-serif;
+  cursor: pointer;
+}
+
+/* ---- Calls ---- */
+.call-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-right: 10px;
+}
+.call-actions.hidden {
+  display: none;
+}
+.call-screen,
+.incoming-call {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  background: #0b0e16;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  animation: fadeIn 0.2s ease both;
+}
+.incoming-call h2,
+.call-info h2 {
+  margin: 0;
+  font-size: 26px;
+}
+.incoming-call p,
+.call-info p {
+  margin: 0;
+  opacity: 0.8;
+}
+.call-remote {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+.call-screen.voice .call-remote {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.call-screen.video:not(.connected) .call-remote {
+  opacity: 0;
+}
+.call-info {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+.call-screen.video.connected .call-info {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top, 0px));
+}
+.call-screen.video.connected .call-avatar {
+  display: none;
+}
+.call-local {
+  position: absolute;
+  z-index: 3;
+  right: 14px;
+  bottom: 120px;
+  width: 110px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: #000;
+  transform: scaleX(-1);
+}
+.call-local.hidden {
+  display: none;
+}
+.call-controls {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  gap: 22px;
+  margin-top: 26px;
+}
+.call-screen .call-controls {
+  position: absolute;
+  bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+  margin: 0;
+}
+.call-btn {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 0.15s ease,
+    background 0.2s ease;
+}
+.call-btn:active {
+  transform: scale(0.92);
+}
+.call-btn.off {
+  background: rgba(255, 255, 255, 0.4);
+}
+.call-btn.end {
+  background: #ef4444;
+}
+.call-btn.accept {
+  background: #22c55e;
+}
+.call-btn.hidden {
+  display: none;
+}
+
+/* ---- Phones: stop iOS zooming on inputs, remove tap delay ---- */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+button,
+a,
+label {
+  touch-action: manipulation;
+}
+@media (max-width: 760px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
