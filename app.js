@@ -1869,13 +1869,18 @@
   let call = null,
     callChannel = null,
     ringTimer = null,
-    iceCache = null;
+    iceCache = null,
+    iceRelay = false;
   const FALLBACK_ICE = [
     { urls: "stun:stun.cloudflare.com:3478" },
     { urls: "stun:stun.l.google.com:19302" },
   ];
   async function getIceServers() {
-    if (iceCache && Date.now() < iceCache.exp) return iceCache.servers;
+    if (iceCache && Date.now() < iceCache.exp) {
+      iceRelay = true;
+      return iceCache.servers;
+    }
+    iceRelay = false;
     try {
       const res = await fetch("/api/ice", { cache: "no-store" });
       if (res.ok) {
@@ -1883,6 +1888,7 @@
         const servers = [].concat(data.iceServers || []);
         if (servers.length) {
           iceCache = { servers, exp: Date.now() + 3600e3 };
+          iceRelay = JSON.stringify(servers).includes("turn:");
           return servers;
         }
       }
@@ -1980,6 +1986,27 @@
   async function createPeer() {
     const pc = new RTCPeerConnection({ iceServers: await getIceServers() });
     call.pc = pc;
+    // Give up cleanly instead of hanging on "Connecting…" forever.
+    call.connectTimer = setTimeout(() => {
+      if (call && call.state !== "connected") {
+        console.error(
+          "Call timed out. Relay:",
+          iceRelay,
+          "ICE:",
+          pc.iceConnectionState,
+        );
+        endCall("failed");
+      }
+    }, 25000);
+    pc.oniceconnectionstatechange = () => {
+      if (call && call.state !== "connected")
+        setCallStatus(
+          "Connecting… (" +
+            pc.iceConnectionState +
+            (iceRelay ? ", relay on" : ", no relay") +
+            ")",
+        );
+    };
     call.local.getTracks().forEach((t) => pc.addTrack(t, call.local));
     pc.onicecandidate = (e) =>
       e.candidate && sendSignal("ice", e.candidate.toJSON());
@@ -2007,6 +2034,7 @@
     if (call.state === "connected") return;
     call.state = "connected";
     call.startedAt = Date.now();
+    clearTimeout(call.connectTimer);
     clearTimeout(call.ringTimeout);
     stopRing();
     document.getElementById("callScreen")?.classList.add("connected");
@@ -2179,6 +2207,7 @@
     call = null;
     clearTimeout(c.ringTimeout);
     clearTimeout(c.discTimer);
+    clearTimeout(c.connectTimer);
     clearInterval(c.timer);
     stopRing();
     c.pc?.close();
@@ -2199,7 +2228,9 @@
       });
     const kindLabel = c.media === "video" ? "video" : "voice";
     const notes = {
-      failed: "Call failed. Check your connection and try again.",
+      failed: iceRelay
+        ? "Call failed. Check your connection and try again."
+        : "Call failed: the call relay isn't set up, so this network blocked the connection.",
       busy: "They're on another call.",
       declined: "Call declined.",
       noanswer: "No answer.",
@@ -2219,13 +2250,11 @@
           : reason === "declined" || reason === "busy"
             ? `📞 ${kindLabel} call declined`
             : `📞 Missed ${kindLabel} call`;
-      await supabase
-        .from("messages")
-        .insert({
-          conversation_id: c.conversationId,
-          sender_id: currentUser.id,
-          content: label,
-        });
+      await supabase.from("messages").insert({
+        conversation_id: c.conversationId,
+        sender_id: currentUser.id,
+        content: label,
+      });
       if (activeConversation === c.conversationId) await loadMessages();
       loadChats();
     }
