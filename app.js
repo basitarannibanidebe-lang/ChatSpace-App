@@ -1968,18 +1968,35 @@
       payload,
     });
 
+  let callRingtoneAudio = null;
   function startRing() {
     stopRing();
-    beep();
-    ringTimer = setInterval(() => {
+    // Custom ringtone plays while the app is open and the call is ringing.
+    callRingtoneAudio = new Audio("/sounds/chatspace-ringtone.mp3");
+    callRingtoneAudio.loop = true;
+    callRingtoneAudio.volume = 0.8;
+    callRingtoneAudio.play().catch(() => {
+      // Browsers may block autoplay until the user interacts with the page.
       beep();
-      setTimeout(beep, 350);
-      if (call?.role === "callee") navigator.vibrate?.([300, 150, 300]);
-    }, 2200);
+      ringTimer = setInterval(() => beep(), 2200);
+    });
+    if (call?.role === "callee") {
+      navigator.vibrate?.([350, 180, 350, 500]);
+      ringTimer = setInterval(() => {
+        if (call?.role === "callee" && call?.state === "ringing")
+          navigator.vibrate?.([350, 180, 350, 500]);
+      }, 2200);
+    }
   }
   function stopRing() {
     clearInterval(ringTimer);
     ringTimer = null;
+    if (callRingtoneAudio) {
+      callRingtoneAudio.pause();
+      callRingtoneAudio.currentTime = 0;
+      callRingtoneAudio = null;
+    }
+    navigator.vibrate?.(0);
   }
 
   function showCallScreen(status) {

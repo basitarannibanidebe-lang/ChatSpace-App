@@ -104,13 +104,21 @@ self.addEventListener("push", (event) => {
     };
   }
   const title = data.title || "ChatSpace";
+  const isIncomingCall = data.type === "incoming_call";
   const options = {
-    body: data.body || "You have a new message.",
+    body:
+      data.body ||
+      (isIncomingCall ? "Someone is calling you" : "You have a new message."),
     icon: data.icon || "/icons/icon-192.png",
     badge: data.badge || "/icons/icon-192.png",
-    tag: data.tag || "chatspace-message",
-    data: { url: data.url || "/" },
-    renotify: Boolean(data.renotify),
+    tag:
+      data.tag ||
+      (isIncomingCall ? "chatspace-incoming-call" : "chatspace-message"),
+    data: { url: data.url || "/", type: data.type || "message" },
+    renotify: isIncomingCall || Boolean(data.renotify),
+    ...(isIncomingCall
+      ? { requireInteraction: true, vibrate: [350, 180, 350, 500, 350] }
+      : {}),
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
