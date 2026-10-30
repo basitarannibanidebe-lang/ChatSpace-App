@@ -1574,53 +1574,30 @@
       toast("You can only edit your own messages.");
       return;
     }
-    const messageTime = new Date(msg.created_at).getTime();
-    const wasSeen =
-      peerReadAt &&
-      Number.isFinite(messageTime) &&
-      peerReadAt.getTime() >= messageTime;
-    if (wasSeen && Date.now() > peerReadAt.getTime() + 60_000) {
-      toast(
-        "This message can no longer be edited: it was seen more than one minute ago.",
-      );
-      return;
-    }
 
     const newContent = window.prompt("Edit your message:", msg.content || "");
-
     if (newContent === null) return;
 
     const content = newContent.trim();
-
     if (!content) {
       toast("A message cannot be empty.");
       return;
     }
-
     if (content === msg.content) {
       toast("No changes were made.");
       return;
     }
 
     editingMessageId = String(msg.id);
-
     try {
-      const { data, error } = await supabase
-        .from("messages")
-        .update({
-          content,
-          is_edited: true,
-        })
-        .eq("id", msg.id)
-        .eq("sender_id", currentUser.id)
-        .select("id");
-
+      // The database function is authoritative for ownership and edit timing.
+      const { data, error } = await supabase.rpc("edit_message", {
+        target_message_id: msg.id,
+        new_content: content,
+      });
       if (error) throw error;
-
-      if (!data || data.length === 0) {
-        throw new Error(
-          "The message was not updated. Check your Supabase permissions.",
-        );
+      if (data !== true) {
+        throw new Error("The message could not be edited.");
       }
 
       toast("Message edited successfully.");
@@ -1632,6 +1609,7 @@
       editingMessageId = null;
     }
   }
+
   async function deleteMessage(msg) {
     if (msg.sender_id !== currentUser.id) {
       alert("You can only delete your own messages.");
@@ -1641,50 +1619,36 @@
     const confirmed = confirm(
       "Delete this message for everyone? This cannot be undone.",
     );
-
     if (!confirmed) return;
 
-    const { data, error } = await supabase
-      .from("messages")
-      .update({
-        deleted_for_everyone: true,
-        content: "This message was deleted",
-        attachment_url: null,
-        attachment_type: null,
-        is_edited: false,
-      })
-      .eq("id", msg.id)
-      .eq("sender_id", currentUser.id)
-      .select("id");
+    const { data, error } = await supabase.rpc("delete_message_for_everyone", {
+      target_message_id: msg.id,
+    });
 
-    if (error) {
+    if (error || data !== true) {
       console.error("Delete message error:", error);
-      alert("Could not delete the message. Please try again.");
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      alert("Message could not be deleted. Check your permissions.");
+      alert(
+        error?.message || "Could not delete the message. Please try again.",
+      );
       return;
     }
 
     await loadMessages();
   }
+
   async function hideMessageForMe(msg) {
     const confirmed = confirm(
       "Hide this message from your chat? The other person will still be able to see it.",
     );
-
     if (!confirmed) return;
 
-    const { error } = await supabase.from("message_hidden_for_user").insert({
-      message_id: msg.id,
-      user_id: currentUser.id,
+    const { data, error } = await supabase.rpc("delete_message_for_me", {
+      target_message_id: msg.id,
     });
 
-    if (error) {
+    if (error || data !== true) {
       console.error("Hide message error:", error);
-      alert("Could not hide this message. Please try again.");
+      alert(error?.message || "Could not hide this message. Please try again.");
       return;
     }
 
