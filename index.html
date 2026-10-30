@@ -439,6 +439,9 @@
           <button id="saveProfileBtn" class="primary-btn full" type="button">
             Save profile
           </button>
+          <button id="shareMyProfileBtn" class="ghost-btn full" type="button">
+            ↗ Share my profile
+          </button>
           <button id="logoutBtn" class="ghost-btn danger full" type="button">
             Log out
           </button>
@@ -448,6 +451,48 @@
       <section id="settingsPanel" class="profile-panel hidden">
         <div class="profile-card">
           <h2>Settings</h2>
+          <h3 class="setting-title">Account information</h3>
+          <p class="tiny muted">
+            Your email is optional. Adding one can help you recover your account
+            if you forget your password.
+          </p>
+          <label for="accountEmailInput">Recovery email (optional)</label>
+          <input
+            id="accountEmailInput"
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+          />
+          <button
+            id="saveAccountEmailBtn"
+            class="primary-btn full"
+            type="button"
+          >
+            Update account information
+          </button>
+          <p id="accountEmailStatus" class="tiny muted" role="status"></p>
+          <h3 class="setting-title">Interface size</h3>
+          <label class="setting-row" for="textScaleInput"
+            ><span
+              ><strong>Text and interface size</strong><br /><small
+                class="muted"
+                >Adjust the app between 90% and 120%.</small
+              ></span
+            ><output id="textScaleValue">100%</output></label
+          >
+          <input
+            id="textScaleInput"
+            class="interface-size-control"
+            type="range"
+            min="90"
+            max="120"
+            step="5"
+            value="100"
+          />
+          <button id="fullscreenBtn" class="ghost-btn full" type="button">
+            ⛶ Toggle full screen
+          </button>
+          <h3 class="setting-title">Privacy</h3>
           <label class="setting-row" for="receiptsToggle">
             <span
               ><strong>Read receipts</strong><br /><small class="muted"
@@ -533,6 +578,9 @@
           </div>
           <h3 class="setting-title">About</h3>
           <p id="peerProfileBio" class="muted"></p>
+          <button id="sharePeerProfileBtn" class="ghost-btn full" type="button">
+            ↗ Share profile
+          </button>
           <button id="peerBlockBtn" class="ghost-btn danger full" type="button">
             Block user
           </button>

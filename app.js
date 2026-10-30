@@ -1166,57 +1166,71 @@
     let holdTimer = null;
     let touchStartX = 0,
       touchStartY = 0,
-      touchHandled = false;
+      touchHandled = false,
+      swipeTriggered = false;
     const revealActions = () => {
       document.querySelectorAll(".message-row.actions-open").forEach((el) => {
         if (el !== row) el.classList.remove("actions-open");
       });
-      row.classList.toggle("actions-open");
+      row.classList.add("actions-open");
     };
+    // Desktop: reveal actions only from the message's context menu.
     row.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       revealActions();
     });
-    row.addEventListener(
+    // Mobile: attach the hold gesture to the bubble only, not the whole row.
+    const gestureTarget = row;
+    gestureTarget.addEventListener(
       "touchstart",
       (event) => {
+        if (event.target.closest("button, a, audio, video")) return;
         const t = event.touches[0];
         touchStartX = t.clientX;
         touchStartY = t.clientY;
         touchHandled = false;
+        swipeTriggered = false;
+        clearTimeout(holdTimer);
         holdTimer = setTimeout(() => {
           touchHandled = true;
+          if (navigator.vibrate) navigator.vibrate(12);
           revealActions();
-        }, 520);
+        }, 560);
       },
       { passive: true },
     );
-    row.addEventListener(
+    gestureTarget.addEventListener(
       "touchmove",
       (event) => {
         const t = event.touches[0];
-        if (
-          Math.abs(t.clientX - touchStartX) > 10 ||
-          Math.abs(t.clientY - touchStartY) > 10
-        )
-          clearTimeout(holdTimer);
-        if (
-          touchStartX - t.clientX > 72 &&
-          Math.abs(t.clientY - touchStartY) < 42
-        ) {
-          clearTimeout(holdTimer);
+        const dx = t.clientX - touchStartX,
+          dy = t.clientY - touchStartY;
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) clearTimeout(holdTimer);
+        if (dx < -65 && Math.abs(dy) < 38 && !swipeTriggered) {
+          swipeTriggered = true;
           touchHandled = true;
           startReply(msg);
           row.classList.add("swipe-reply");
-          setTimeout(() => row.classList.remove("swipe-reply"), 500);
+          setTimeout(() => row.classList.remove("swipe-reply"), 450);
         }
       },
       { passive: true },
     );
-    row.addEventListener("touchend", () => clearTimeout(holdTimer), {
+    gestureTarget.addEventListener("touchend", () => clearTimeout(holdTimer), {
       passive: true,
     });
+    gestureTarget.addEventListener(
+      "touchcancel",
+      () => clearTimeout(holdTimer),
+      { passive: true },
+    );
     row.addEventListener("click", (event) => {
+      if (touchHandled) {
+        event.preventDefault();
+        event.stopPropagation();
+        touchHandled = false;
+        return;
+      }
       if (event.target.closest("button, a, audio, img")) return;
       if (
         window.matchMedia("(max-width: 760px)").matches &&
@@ -3460,7 +3474,11 @@
     $("newChatPanel").classList.toggle("hidden", view !== "new");
     if (view === "new") ncShow("ncHome");
     $("settingsPanel").classList.toggle("hidden", view !== "settings");
-    if (view === "settings") loadSettings();
+    if (view === "settings") {
+      loadSettings();
+      const emailField = $("accountEmailInput");
+      if (emailField && currentUser) emailField.value = currentUser.email || "";
+    }
     document
       .querySelectorAll(".nav-btn")
       .forEach((b) => b.classList.toggle("active", b.dataset.nav === view));
@@ -3500,23 +3518,59 @@
 
   async function shareProfile(profile) {
     if (!profile?.username) return toast("Profile username is unavailable.");
-    const link = `${location.origin}${location.pathname}?user=${encodeURIComponent(profile.username)}`;
+    const link = new URL(location.pathname, location.origin);
+    link.searchParams.set("user", profile.username);
+    const shareUrl = link.toString();
     const shareData = {
       title: `${profile.display_name || profile.username} on ChatSpace`,
-      text: `Find me on ChatSpace: @${profile.username}`,
-      url: link,
+      text: `Find ${profile.display_name || profile.username} on ChatSpace (@${profile.username})`,
+      url: shareUrl,
     };
     try {
-      if (navigator.share) await navigator.share(shareData);
-      else {
-        await navigator.clipboard.writeText(link);
-        toast("Profile link copied.");
+      if (navigator.share && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        await navigator.share(shareData);
+        return;
       }
+      if (navigator.clipboard?.writeText && window.isSecureContext) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        const field = document.createElement("textarea");
+        field.value = shareUrl;
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        const copied = document.execCommand("copy");
+        field.remove();
+        if (!copied) throw new Error("Clipboard unavailable");
+      }
+      toast("Profile link copied. You can now share it.");
     } catch (error) {
       if (error.name !== "AbortError")
-        toast("Couldn't share the profile link.");
+        toast("Sharing failed. Copy this link: " + shareUrl);
     }
   }
+  // Optional recovery email: updates Supabase Auth only when the user enters one.
+  const accountEmailInput = $("accountEmailInput");
+  const accountEmailStatus = $("accountEmailStatus");
+  if (accountEmailInput && currentUser)
+    accountEmailInput.value = currentUser.email || "";
+  $("saveAccountEmailBtn")?.addEventListener("click", async () => {
+    const email = accountEmailInput?.value.trim() || "";
+    if (!email)
+      return toast(
+        "Email is optional. Enter one only if you want recovery by email.",
+      );
+    const { error } = await supabase.auth.updateUser({ email });
+    if (error) {
+      if (accountEmailStatus) accountEmailStatus.textContent = error.message;
+      return toast("Could not update email: " + error.message);
+    }
+    if (accountEmailStatus)
+      accountEmailStatus.textContent =
+        "Check your inbox if email confirmation is enabled.";
+    toast("Email update requested.");
+  });
   $("shareMyProfileBtn")?.addEventListener("click", () =>
     shareProfile(currentProfile),
   );
@@ -3542,11 +3596,15 @@
       "--ui-scale",
       `${scaleInput.value}%`,
     );
+    if ($("textScaleValue"))
+      $("textScaleValue").textContent = `${scaleInput.value}%`;
     scaleInput.addEventListener("input", () => {
       document.documentElement.style.setProperty(
         "--ui-scale",
         `${scaleInput.value}%`,
       );
+      if ($("textScaleValue"))
+        $("textScaleValue").textContent = `${scaleInput.value}%`;
       localStorage.setItem("chatspace-ui-scale", scaleInput.value);
     });
   }
