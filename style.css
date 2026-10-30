@@ -3391,3 +3391,57 @@ html[data-theme="light"] .chat-list-item.active {
     gap: 4px;
   }
 }
+
+/* ChatSpace reaction overflow hardening */
+.message-row {
+  min-width: 0;
+}
+
+.message-reactions {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: flex-start;
+}
+
+.reaction-picker {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.reaction-options {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(250px, calc(100vw - 24px));
+  flex-wrap: wrap;
+  justify-content: center;
+  overflow-wrap: anywhere;
+}
+
+.message-row.mine .reaction-options {
+  left: auto;
+  right: 0;
+}
+
+.message-row:not(.mine) .reaction-options {
+  left: 0;
+  right: auto;
+}
+
+.reaction-option {
+  flex: 0 0 34px;
+}
+
+@media (max-width: 760px) {
+  .reaction-options {
+    max-width: min(236px, calc(100vw - 24px));
+    gap: 3px;
+    padding: 5px;
+  }
+
+  .reaction-option {
+    flex-basis: 32px;
+    width: 32px;
+    height: 32px;
+  }
+}
