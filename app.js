@@ -1163,6 +1163,67 @@
       row.classList.add("msg-new");
     animatedIds.add(msg.id);
     row.dataset.messageId = messageId;
+    let holdTimer = null;
+    let touchStartX = 0,
+      touchStartY = 0,
+      touchHandled = false;
+    const revealActions = () => {
+      document.querySelectorAll(".message-row.actions-open").forEach((el) => {
+        if (el !== row) el.classList.remove("actions-open");
+      });
+      row.classList.toggle("actions-open");
+    };
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      revealActions();
+    });
+    row.addEventListener(
+      "touchstart",
+      (event) => {
+        const t = event.touches[0];
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchHandled = false;
+        holdTimer = setTimeout(() => {
+          touchHandled = true;
+          revealActions();
+        }, 520);
+      },
+      { passive: true },
+    );
+    row.addEventListener(
+      "touchmove",
+      (event) => {
+        const t = event.touches[0];
+        if (
+          Math.abs(t.clientX - touchStartX) > 10 ||
+          Math.abs(t.clientY - touchStartY) > 10
+        )
+          clearTimeout(holdTimer);
+        if (
+          touchStartX - t.clientX > 72 &&
+          Math.abs(t.clientY - touchStartY) < 42
+        ) {
+          clearTimeout(holdTimer);
+          touchHandled = true;
+          startReply(msg);
+          row.classList.add("swipe-reply");
+          setTimeout(() => row.classList.remove("swipe-reply"), 500);
+        }
+      },
+      { passive: true },
+    );
+    row.addEventListener("touchend", () => clearTimeout(holdTimer), {
+      passive: true,
+    });
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, audio, img")) return;
+      if (
+        window.matchMedia("(max-width: 760px)").matches &&
+        row.classList.contains("actions-open")
+      )
+        row.classList.remove("actions-open");
+    });
 
     let body = "";
 
@@ -1499,6 +1560,17 @@
       toast("You can only edit your own messages.");
       return;
     }
+    const messageTime = new Date(msg.created_at).getTime();
+    const wasSeen =
+      peerReadAt &&
+      Number.isFinite(messageTime) &&
+      peerReadAt.getTime() >= messageTime;
+    if (wasSeen && Date.now() > peerReadAt.getTime() + 60_000) {
+      toast(
+        "This message can no longer be edited: it was seen more than one minute ago.",
+      );
+      return;
+    }
 
     const newContent = window.prompt("Edit your message:", msg.content || "");
 
@@ -1625,8 +1697,8 @@
       attachmentUrl = null,
       finalContent = content.trim();
     if (attachment) {
-      if (attachment.size > 10 * 1024 * 1024) {
-        toast("File is larger than 10 MB.");
+      if (attachment.size > 50 * 1024 * 1024) {
+        toast("File is larger than 50 MB.");
         return;
       }
       const ext = (
@@ -3223,8 +3295,8 @@
       return;
     }
 
-    if (selectedFile.size > 10 * 1024 * 1024) {
-      toast("Choose a file smaller than 10 MB.");
+    if (selectedFile.size > 50 * 1024 * 1024) {
+      toast("Choose a file smaller than 50 MB.");
       selectedFile = null;
       event.target.value = "";
       $("attachmentPreview").classList.add("hidden");
@@ -3264,7 +3336,7 @@
         const blob = new Blob(recordingChunks, {
           type: mediaRecorder.mimeType || "audio/webm",
         });
-        if (blob.size > 10 * 1024 * 1024) {
+        if (blob.size > 50 * 1024 * 1024) {
           toast("Voice note is too large. Record a shorter note.");
           return;
         }
@@ -3425,6 +3497,59 @@
     loadChats();
     toast("Profile saved.");
   });
+
+  async function shareProfile(profile) {
+    if (!profile?.username) return toast("Profile username is unavailable.");
+    const link = `${location.origin}${location.pathname}?user=${encodeURIComponent(profile.username)}`;
+    const shareData = {
+      title: `${profile.display_name || profile.username} on ChatSpace`,
+      text: `Find me on ChatSpace: @${profile.username}`,
+      url: link,
+    };
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else {
+        await navigator.clipboard.writeText(link);
+        toast("Profile link copied.");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError")
+        toast("Couldn't share the profile link.");
+    }
+  }
+  $("shareMyProfileBtn")?.addEventListener("click", () =>
+    shareProfile(currentProfile),
+  );
+  $("sharePeerProfileBtn")?.addEventListener("click", () =>
+    shareProfile(profilePeer || activePeer),
+  );
+  $("fullscreenBtn")?.addEventListener("click", async () => {
+    try {
+      if (!document.fullscreenElement)
+        await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
+    } catch {
+      toast("Full screen is not available in this browser.");
+    }
+  });
+  const scaleInput = $("textScaleInput");
+  if (scaleInput) {
+    const savedScale = Number(
+      localStorage.getItem("chatspace-ui-scale") || 100,
+    );
+    scaleInput.value = String(Math.min(120, Math.max(90, savedScale)));
+    document.documentElement.style.setProperty(
+      "--ui-scale",
+      `${scaleInput.value}%`,
+    );
+    scaleInput.addEventListener("input", () => {
+      document.documentElement.style.setProperty(
+        "--ui-scale",
+        `${scaleInput.value}%`,
+      );
+      localStorage.setItem("chatspace-ui-scale", scaleInput.value);
+    });
+  }
 
   $("avatarInput").addEventListener("change", async (e) => {
     const file = e.target.files[0];
