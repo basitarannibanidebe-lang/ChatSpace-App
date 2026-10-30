@@ -1,14 +1,10 @@
-// Paste your Supabase Project URL and publishable key below.
-// These are browser/client values. NEVER put a service-role key or database password here.
-window.CHATSPACE_CONFIG = {
-  SUPABASE_URL: "https://ylhcmgdjmlscgaweszxb.supabase.co",
-  SUPABASE_PUBLISHABLE_KEY: "sb_publishable_AslalGtw0WY08qI1-FjMQw_PYnSePUM"
-};
-// Paste your Supabase Project URL and publishable key below.
-// These are browser/client values. NEVER put a service-role key or database password here.
+// Browser-safe configuration only. Never place service-role keys or private VAPID keys here.
 window.CHATSPACE_CONFIG = {
   SUPABASE_URL: "https://ylhcmgdjmlscgaweszxb.supabase.co",
   SUPABASE_PUBLISHABLE_KEY: "sb_publishable_AslalGtw0WY08qI1-FjMQw_PYnSePUM",
-  // GIF and sticker search (KLIPY). This key is visible in the browser.
-  KLIPY_API_KEY: "7XylyPwwaYozeOoHSPIdzNSd1o1Zu1Zlv2tcMMBCDPkOppt54p906koCunipXytl"
+  VAPID_PUBLIC_KEY:
+    "BFNks_ssjL8TignfFzpCiG46a6NQlztOu7-a0_tjTfmbJQxOefdPIh-Vt4DNxX2x08XaBCJNIpOZaC-fQBydVXE",
+  // This KLIPY key is browser-visible; restrict it in the provider dashboard.
+  KLIPY_API_KEY:
+    "7XylyPwwy9aOoZeOoHSPIdzNSd1o1Zu1Zlv2tcMMBCDPkOppt54p906koCunipXytl",
 };

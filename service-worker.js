@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v3";
+const CACHE_NAME = "chatspace-v4-push";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -77,11 +77,40 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
-      .then((list) =>
-        list.length ? list[0].focus() : self.clients.openWindow("/"),
-      ),
+      .then((list) => {
+        const existing = list.find(
+          (client) => new URL(client.url).origin === self.location.origin,
+        );
+        if (existing) {
+          existing.navigate(targetUrl);
+          return existing.focus();
+        }
+        return self.clients.openWindow(targetUrl);
+      }),
   );
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch (_) {
+    data = {
+      body: event.data ? event.data.text() : "You have a new notification.",
+    };
+  }
+  const title = data.title || "ChatSpace";
+  const options = {
+    body: data.body || "You have a new message.",
+    icon: data.icon || "/icons/icon-192.png",
+    badge: data.badge || "/icons/icon-192.png",
+    tag: data.tag || "chatspace-message",
+    data: { url: data.url || "/" },
+    renotify: Boolean(data.renotify),
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
 });

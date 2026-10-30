@@ -1049,65 +1049,28 @@
       return;
     }
 
-    const messageId = String(message.id);
+    if (!REACTION_EMOJIS.includes(emoji)) {
+      toast("That reaction isn't supported.");
+      return;
+    }
+
     const conversationId = activeConversation;
 
-    const reactions = reactionCache.get(messageId) || [];
-
-    const existing = reactions.find(
-      (reaction) => reaction.user_id === currentUser.id,
-    );
-
     try {
-      if (existing?.emoji === emoji) {
-        // Clicking your selected emoji removes it.
-        const { error } = await supabase
-          .from("message_reactions")
-          .delete()
-          .eq("id", existing.id)
-          .eq("user_id", currentUser.id);
+      const { error } = await supabase.rpc("toggle_message_reaction", {
+        target_message_id: message.id,
+        target_emoji: emoji,
+      });
+      if (error) throw error;
 
-        if (error) throw error;
-      } else if (existing) {
-        // Change the existing reaction instead of creating another.
-        const { error } = await supabase
-          .from("message_reactions")
-          .update({ emoji })
-          .eq("id", existing.id)
-          .eq("user_id", currentUser.id);
-
-        if (error) throw error;
-      } else {
-        // Add a new reaction.
-
-        const { error } = await supabase.from("message_reactions").upsert(
-          {
-            message_id: message.id,
-            user_id: currentUser.id,
-            emoji: emoji,
-          },
-          {
-            onConflict: "message_id,user_id",
-          },
-        );
-
-        if (error) throw error;
-        if (error) {
-          console.error("Could not upload reaction:", error);
-          alert("Could not save reaction: " + error.message);
-          return;
-        }
-      }
-
-      // Don't update a different conversation if the user switched chats.
+      // Don't refresh a different conversation if the user switched chats.
       if (conversationId === activeConversation) {
         await refreshVisibleReactions();
       }
     } catch (error) {
       console.error("Reaction update failed:", error);
-
       toast(
-        "Couldn't update reaction: " + (error.message || "Please try again."),
+        "Couldn't save reaction: " + (error.message || "Please try again."),
       );
     }
   }
@@ -1574,30 +1537,53 @@
       toast("You can only edit your own messages.");
       return;
     }
+    const messageTime = new Date(msg.created_at).getTime();
+    const wasSeen =
+      peerReadAt &&
+      Number.isFinite(messageTime) &&
+      peerReadAt.getTime() >= messageTime;
+    if (wasSeen && Date.now() > peerReadAt.getTime() + 60_000) {
+      toast(
+        "This message can no longer be edited: it was seen more than one minute ago.",
+      );
+      return;
+    }
 
     const newContent = window.prompt("Edit your message:", msg.content || "");
+
     if (newContent === null) return;
 
     const content = newContent.trim();
+
     if (!content) {
       toast("A message cannot be empty.");
       return;
     }
+
     if (content === msg.content) {
       toast("No changes were made.");
       return;
     }
 
     editingMessageId = String(msg.id);
+
     try {
-      // The database function is authoritative for ownership and edit timing.
-      const { data, error } = await supabase.rpc("edit_message", {
-        target_message_id: msg.id,
-        new_content: content,
-      });
+      const { data, error } = await supabase
+        .from("messages")
+        .update({
+          content,
+          is_edited: true,
+        })
+        .eq("id", msg.id)
+        .eq("sender_id", currentUser.id)
+        .select("id");
+
       if (error) throw error;
-      if (data !== true) {
-        throw new Error("The message could not be edited.");
+
+      if (!data || data.length === 0) {
+        throw new Error(
+          "The message was not updated. Check your Supabase permissions.",
+        );
       }
 
       toast("Message edited successfully.");
@@ -1609,7 +1595,6 @@
       editingMessageId = null;
     }
   }
-
   async function deleteMessage(msg) {
     if (msg.sender_id !== currentUser.id) {
       alert("You can only delete your own messages.");
@@ -1619,36 +1604,50 @@
     const confirmed = confirm(
       "Delete this message for everyone? This cannot be undone.",
     );
+
     if (!confirmed) return;
 
-    const { data, error } = await supabase.rpc("delete_message_for_everyone", {
-      target_message_id: msg.id,
-    });
+    const { data, error } = await supabase
+      .from("messages")
+      .update({
+        deleted_for_everyone: true,
+        content: "This message was deleted",
+        attachment_url: null,
+        attachment_type: null,
+        is_edited: false,
+      })
+      .eq("id", msg.id)
+      .eq("sender_id", currentUser.id)
+      .select("id");
 
-    if (error || data !== true) {
+    if (error) {
       console.error("Delete message error:", error);
-      alert(
-        error?.message || "Could not delete the message. Please try again.",
-      );
+      alert("Could not delete the message. Please try again.");
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      alert("Message could not be deleted. Check your permissions.");
       return;
     }
 
     await loadMessages();
   }
-
   async function hideMessageForMe(msg) {
     const confirmed = confirm(
       "Hide this message from your chat? The other person will still be able to see it.",
     );
+
     if (!confirmed) return;
 
-    const { data, error } = await supabase.rpc("delete_message_for_me", {
-      target_message_id: msg.id,
+    const { error } = await supabase.from("message_hidden_for_user").insert({
+      message_id: msg.id,
+      user_id: currentUser.id,
     });
 
-    if (error || data !== true) {
+    if (error) {
       console.error("Hide message error:", error);
-      alert(error?.message || "Could not hide this message. Please try again.");
+      alert("Could not hide this message. Please try again.");
       return;
     }
 
@@ -3843,19 +3842,104 @@
   $("soundToggle").addEventListener("change", (e) =>
     saveSetting({ notification_sound: e.target.checked }),
   );
-  $("notifyToggle").addEventListener("change", async (e) => {
-    if (e.target.checked) {
-      if (!("Notification" in window)) {
-        e.target.checked = false;
-        return toast("This browser doesn't support notifications.");
-      }
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        e.target.checked = false;
-        return toast("Notifications are blocked in your browser settings.");
+  const PUSH_PUBLIC_KEY = cfg.VAPID_PUBLIC_KEY || "PASTE_VAPID_PUBLIC_KEY_HERE";
+
+  function urlBase64ToUint8Array(value) {
+    const padding = "=".repeat((4 - (value.length % 4)) % 4);
+    const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(base64);
+    return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+  }
+
+  async function savePushSubscription(subscription) {
+    const json = subscription.toJSON();
+    const { error } = await supabase.from("push_subscriptions").upsert(
+      {
+        user_id: currentUser.id,
+        endpoint: json.endpoint,
+        p256dh: json.keys?.p256dh,
+        auth: json.keys?.auth,
+        user_agent: navigator.userAgent.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "endpoint" },
+    );
+    if (error) throw error;
+  }
+
+  async function enablePushNotifications() {
+    if (
+      !("Notification" in window) ||
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    )
+      throw new Error(
+        "This browser does not support background push notifications.",
+      );
+    if (!window.isSecureContext)
+      throw new Error("Push notifications require HTTPS (or localhost).");
+    if (!PUSH_PUBLIC_KEY || PUSH_PUBLIC_KEY.includes("PASTE_"))
+      throw new Error("Add your VAPID public key to config.js first.");
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted")
+      throw new Error("Allow notifications in your browser settings.");
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(PUSH_PUBLIC_KEY),
+      });
+    }
+    await savePushSubscription(subscription);
+    return true;
+  }
+
+  async function disablePushNotifications() {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        const endpoint = subscription.endpoint;
+        await subscription.unsubscribe();
+        const { error } = await supabase
+          .from("push_subscriptions")
+          .delete()
+          .eq("endpoint", endpoint);
+        if (error)
+          console.warn(
+            "Could not remove push subscription from database:",
+            error,
+          );
       }
     }
-    saveSetting({ notifications_enabled: e.target.checked });
+  }
+
+  $("notifyToggle").addEventListener("change", async (e) => {
+    const enabled = e.target.checked;
+    e.target.disabled = true;
+    try {
+      if (enabled) {
+        await enablePushNotifications();
+        const saved = await saveSetting({ notifications_enabled: true });
+        if (!saved)
+          throw new Error("Could not save your notification setting.");
+        toast("Background notifications are enabled on this device.");
+      } else {
+        await disablePushNotifications();
+        await saveSetting({ notifications_enabled: false });
+        toast("Notifications disabled on this device.");
+      }
+    } catch (error) {
+      e.target.checked = false;
+      await saveSetting({ notifications_enabled: false });
+      toast(error.message || "Could not configure notifications.");
+    } finally {
+      e.target.disabled = false;
+      renderSettingsUi();
+    }
   });
 
   function beep() {
