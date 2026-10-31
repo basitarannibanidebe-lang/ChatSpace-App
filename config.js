@@ -6,5 +6,5 @@ window.CHATSPACE_CONFIG = {
     "BFNks_ssjL8TignfFzpCiG46a6NQlztOu7-a0_tjTfmbJQxOefdPIh-Vt4DNxX2x08XaBCJNIpOZaC-fQBydVXE",
   // This KLIPY key is browser-visible; restrict it in the provider dashboard.
   KLIPY_API_KEY:
-    "7XylyPwwy9aOoZeOoHSPIdzNSd1o1Zu1Zlv2tcMMBCDPkOppt54p906koCunipXytl",
+    "7XylyPwwaYozeOoHSPIdzNSd1o1Zu1Zlv2tcMMBCDPkOppt54p906koCunipXytl",
 };

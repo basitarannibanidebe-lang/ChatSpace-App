@@ -59,7 +59,9 @@
     okAvatar(p.avatar_url)
       ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
       : escapeHtml((peerName(p)[0] || "?").toUpperCase());
-  const peerName = (p) => p.display_name || p.username;
+  let contactNames = new Map();
+  const peerName = (p) =>
+    contactNames.get(p.id ?? p.user_id) || p.display_name || p.username;
   function setAvatar(el, p) {
     el.innerHTML = okAvatar(p.avatar_url)
       ? `<img src="${escapeHtml(p.avatar_url)}" alt="" />`
@@ -1030,6 +1032,16 @@
       options.classList.toggle("hidden", !opening);
 
       pickerButton.setAttribute("aria-expanded", String(opening));
+
+      // Keep the emoji bar fully on screen.
+      options.style.translate = "0 0";
+      if (opening) {
+        const r = options.getBoundingClientRect();
+        const over = r.right - (innerWidth - 8);
+        const under = 8 - r.left;
+        if (over > 0) options.style.translate = `${-over}px 0`;
+        else if (under > 0) options.style.translate = `${under}px 0`;
+      }
     });
 
     picker.append(pickerButton, options);
@@ -2984,6 +2996,7 @@
     $("peerProfileStatus").textContent = status;
     $("peerProfileStatus").classList.toggle("online", status === "Online");
     $("peerProfileBio").textContent = p.bio || "No bio yet.";
+    $("contactNameInput").value = contactNames.get(p.id) || "";
     $("peerBlockBtn").textContent = blockedIds.has(p.id)
       ? "Unblock user"
       : "Block user";
@@ -3528,26 +3541,26 @@
         toast("Sharing failed. Copy this link: " + shareUrl);
     }
   }
-  // Optional recovery email: updates Supabase Auth only when the user enters one.
+  // Optional recovery email. It is saved with your settings and never replaces the
+  // sign-in address, so signing in with your username keeps working.
   const accountEmailInput = $("accountEmailInput");
   const accountEmailStatus = $("accountEmailStatus");
-  if (accountEmailInput && currentUser)
-    accountEmailInput.value = currentUser.email || "";
-  $("saveAccountEmailBtn")?.addEventListener("click", async () => {
-    const email = accountEmailInput?.value.trim() || "";
-    if (!email)
-      return toast(
-        "Email is optional. Enter one only if you want recovery by email.",
-      );
-    const { error } = await supabase.auth.updateUser({ email });
-    if (error) {
-      if (accountEmailStatus) accountEmailStatus.textContent = error.message;
-      return toast("Could not update email: " + error.message);
-    }
+  function showRecoveryEmail() {
+    if (accountEmailInput) accountEmailInput.value = appSettings.recovery_email || "";
     if (accountEmailStatus)
-      accountEmailStatus.textContent =
-        "Check your inbox if email confirmation is enabled.";
-    toast("Email update requested.");
+      accountEmailStatus.textContent = appSettings.recovery_email
+        ? "Saved. It will be used only to help you recover your account."
+        : "Optional. Add one only if you want a way to recover your account.";
+  }
+  $("saveAccountEmailBtn")?.addEventListener("click", async () => {
+    const email = (accountEmailInput?.value || "").trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))
+      return toast("Enter a valid email address.");
+    const ok = await saveSetting({ recovery_email: email || null });
+    if (ok) {
+      toast(email ? "Recovery email saved." : "Recovery email removed.");
+      showRecoveryEmail();
+    }
   });
   $("shareMyProfileBtn")?.addEventListener("click", () =>
     shareProfile(currentProfile),
@@ -3768,6 +3781,72 @@
     applyAppearance,
   );
 
+  // ---- Contact names (private to you) and profile links ----
+  async function loadContactNames() {
+    const { data, error } = await supabase
+      .from("contact_names")
+      .select("contact_id, custom_name")
+      .eq("owner_id", currentUser.id);
+    if (error) return;
+    contactNames = new Map((data || []).map((r) => [r.contact_id, r.custom_name]));
+    loadChats();
+  }
+  $("saveContactNameBtn")?.addEventListener("click", async () => {
+    if (!profilePeer) return;
+    const name = $("contactNameInput").value.trim();
+    const { error } = name
+      ? await supabase
+          .from("contact_names")
+          .upsert({ owner_id: currentUser.id, contact_id: profilePeer.id, custom_name: name })
+      : await supabase
+          .from("contact_names")
+          .delete()
+          .eq("owner_id", currentUser.id)
+          .eq("contact_id", profilePeer.id);
+    if (error) return toast("Could not save the contact name: " + error.message);
+    if (name) contactNames.set(profilePeer.id, name);
+    else contactNames.delete(profilePeer.id);
+    $("peerProfileName").textContent = peerName(profilePeer);
+    if (activePeer?.id === profilePeer.id) $("peerName").textContent = peerName(activePeer);
+    loadChats();
+    toast(name ? "Contact name saved." : "Contact name removed.");
+  });
+  $("peerMessageBtn")?.addEventListener("click", () => {
+    if (!profilePeer) return;
+    $("peerProfilePanel").classList.add("hidden");
+    startConversation(profilePeer);
+  });
+
+  // Links look like https://yoursite/?user=name. The name is remembered so the
+  // link still works after the person logs in.
+  const LINK_KEY = "chatspace-pending-user";
+  try {
+    const linked = new URLSearchParams(location.search).get("user");
+    if (linked) {
+      localStorage.setItem(LINK_KEY, linked);
+      history.replaceState(null, "", location.pathname);
+    }
+  } catch {}
+  async function openProfileFromLink() {
+    let name = null;
+    try {
+      name = localStorage.getItem(LINK_KEY);
+      localStorage.removeItem(LINK_KEY);
+    } catch {}
+    if (!name || !currentUser) return;
+    const clean = cleanUsername(name);
+    if (!clean) return;
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, avatar_url")
+      .eq("username", clean)
+      .maybeSingle();
+    if (!data) return toast("That profile link does not match anyone.");
+    if (data.id === currentUser.id) return showView("profile");
+    showView("messages");
+    openPeerProfile(data);
+  }
+
   async function loadAppearance() {
     const { data } = await supabase
       .from("user_settings")
@@ -3782,6 +3861,8 @@
     applyAppearance();
     startPresence();
     startCallListener();
+    loadContactNames();
+    openProfileFromLink();
   }
   async function saveSetting(changes) {
     appSettings = { ...appSettings, ...changes };
@@ -3813,6 +3894,9 @@
         ),
       );
     $("soundToggle").checked = appSettings.notification_sound;
+    try {
+      showRecoveryEmail();
+    } catch {}
     $("lastSeenToggle").checked = appSettings.show_last_seen !== false;
     const hasPin = Boolean(appSettings.chat_lock_hash);
     $("pinStatus").textContent = hasPin ? "A PIN is set." : "No PIN set yet.";

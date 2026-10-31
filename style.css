@@ -3445,3 +3445,58 @@ html[data-theme="light"] .chat-list-item.active {
     height: 32px;
   }
 }
+
+/* ===== Phone layout fixes: no sideways overflow, full-screen chat ===== */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+@media (max-width: 760px) {
+  /* "1fr" lets one long line stretch the whole page wider than the screen. */
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    width: 100%;
+    max-width: 100%;
+  }
+  .app-shell:not(.chat-open) {
+    padding-bottom: 64px !important;
+  }
+  .sidebar,
+  .chat-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+  .chat-panel {
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+  .messages {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .message-row {
+    max-width: 88%;
+    min-width: 0;
+  }
+  .bubble,
+  .reply-quote {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .reply-quote span {
+    display: block;
+    max-width: 100%;
+  }
+  .reaction-options {
+    max-width: calc(100vw - 24px);
+  }
+}
