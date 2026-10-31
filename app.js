@@ -79,7 +79,10 @@
         (payload) => {
           if (payload.new.sender_id !== currentUser.id)
             notifyIncoming(payload.new);
-          if (payload.new.conversation_id === activeConversation) return;
+          if (payload.new.conversation_id === activeConversation) {
+            scheduleStatsRefresh();
+            return;
+          }
           clearTimeout(listTimer);
           listTimer = setTimeout(loadChats, 400);
         },
@@ -300,6 +303,234 @@
     }
   }
 
+  // =========================================
+  // CHAT SCORES, STAGES, STREAKS AND BADGES
+  // (numbers are calculated by the database; the app only shows them)
+  // =========================================
+  const STAGES = [
+    { min: 0, icon: "🌱", name: "New chat" },
+    { min: 50, icon: "🤝", name: "Acquaintances" },
+    { min: 200, icon: "😊", name: "Friends" },
+    { min: 600, icon: "💜", name: "Close friends" },
+    { min: 1500, icon: "🌟", name: "Best friends" },
+    { min: 4000, icon: "💎", name: "Inseparable" },
+  ];
+  const stageFor = (score) => {
+    let i = 0;
+    STAGES.forEach((st, n) => {
+      if (score >= st.min) i = n;
+    });
+    return { ...STAGES[i], next: STAGES[i + 1] || null };
+  };
+  const BADGES = {
+    first_message: ["💬", "First words", "Send your first message."],
+    chatty_100: ["🗨️", "Chatterbox", "Send 100 messages."],
+    chatty_1000: ["🏆", "Legend", "Send 1,000 messages."],
+    voice_star: ["🎙️", "Voice star", "Send 25 voice notes."],
+    shutterbug: ["📸", "Shutterbug", "Send 25 photos."],
+    streak_3: ["🔥", "On a roll", "Keep a 3-day streak with someone."],
+    streak_7: ["⚡", "Week warrior", "Keep a 7-day streak with someone."],
+    streak_30: ["🌋", "Unstoppable", "Keep a 30-day streak with someone."],
+    streak_100: ["👑", "Streak royalty", "Keep a 100-day streak with someone."],
+  };
+  let chatStats = new Map(),
+    badgeChannel = null,
+    statsTimer = null;
+
+  async function loadChatStats() {
+    // If the SQL has not been run yet, or we are offline, keep what we have.
+    const { data, error } = await supabase.rpc("get_my_chat_stats");
+    if (error || !Array.isArray(data)) return;
+    const previous = chatStats;
+    chatStats = new Map(
+      data.map((r) => [
+        r.conversation_id,
+        {
+          score: Number(r.score) || 0,
+          streak: Number(r.current_streak) || 0,
+          best: Number(r.best_streak) || 0,
+          atRisk: Boolean(r.streak_at_risk),
+          sentToday: Boolean(r.my_sent_today),
+        },
+      ]),
+    );
+    if (!previous.size) return;
+    for (const [id, now] of chatStats) {
+      const before = previous.get(id);
+      if (before && now.streak > before.streak && now.streak >= 2) {
+        const peer = lastPeers.find((x) => x.conversationId === id);
+        toast(
+          `🔥 ${now.streak}-day streak${peer ? " with " + peerName(peer) : ""}!`,
+        );
+      }
+    }
+  }
+  function scheduleStatsRefresh() {
+    clearTimeout(statsTimer);
+    statsTimer = setTimeout(async () => {
+      await loadChatStats();
+      renderStatsChip();
+    }, 600);
+  }
+  function statMarks(stats) {
+    if (!stats) return "";
+    const out = [];
+    if (stats.streak > 0)
+      out.push(
+        `<span class="streak-mini" title="Streak">🔥${stats.streak}${stats.atRisk ? "⏳" : ""}</span>`,
+      );
+    const st = stageFor(stats.score);
+    if (st.min > 0)
+      out.push(
+        `<span class="stage-mini" title="${escapeHtml(st.name)}">${st.icon}</span>`,
+      );
+    return out.join(" ");
+  }
+  function renderStatsChip() {
+    const el = $("chatStatsBar");
+    if (!el) return;
+    const s =
+      activePeer && !activePeer.isGroup
+        ? chatStats.get(activeConversation)
+        : null;
+    if (!s) {
+      el.classList.add("hidden");
+      el.innerHTML = "";
+      return;
+    }
+    const st = stageFor(s.score);
+    el.classList.remove("hidden");
+    el.innerHTML =
+      (s.streak > 0
+        ? `<span class="stat-chip flame">🔥 ${s.streak}${s.atRisk ? " ⏳" : ""}</span>`
+        : "") +
+      `<span class="stat-chip">${st.icon} ${escapeHtml(st.name)}</span>`;
+  }
+  $("chatStatsBar")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const s = chatStats.get(activeConversation);
+    if (s && activePeer) openStatsSheet(activePeer, s);
+  });
+
+  function openStatsSheet(peer, s) {
+    document.querySelectorAll(".stats-backdrop").forEach((n) => n.remove());
+    const st = stageFor(s.score);
+    const pct = st.next
+      ? Math.min(
+          100,
+          Math.round(((s.score - st.min) / (st.next.min - st.min)) * 100),
+        )
+      : 100;
+    const box = document.createElement("div");
+    box.className = "stats-backdrop";
+    box.innerHTML = `
+      <div class="stats-sheet" role="dialog" aria-label="Chat progress">
+        <div class="stats-top">
+          <div class="stats-stage">${st.icon}</div>
+          <div>
+            <h3>${escapeHtml(st.name)}</h3>
+            <p class="tiny muted">You and ${escapeHtml(peerName(peer))}</p>
+          </div>
+        </div>
+        <div class="stats-bar"><i style="width:${pct}%"></i></div>
+        <p class="tiny muted">${
+          st.next
+            ? `${s.score} points · ${st.next.min - s.score} more to reach ${st.next.icon} ${escapeHtml(st.next.name)}`
+            : `${s.score} points · top stage reached`
+        }</p>
+        <div class="stats-tiles">
+          <div><strong>🔥 ${s.streak}</strong><span>Current streak</span></div>
+          <div><strong>🏅 ${s.best}</strong><span>Best streak</span></div>
+          <div><strong>⭐ ${s.score}</strong><span>Chat score</span></div>
+        </div>
+        ${
+          s.atRisk && !s.sentToday
+            ? '<p class="stats-warn">⏳ Message today to keep your streak alive. Both of you need to send something.</p>'
+            : ""
+        }
+        <details class="stats-how">
+          <summary>How points work</summary>
+          <ul>
+            <li>Each message is 1 point. Photos, GIFs and voice notes are 2.</li>
+            <li>You can earn up to 50 points per chat per day.</li>
+            <li>A streak day is a day when <em>both</em> of you send a message (+10 bonus).</li>
+            <li>Miss a day and the streak starts again. Days follow Nigerian time.</li>
+          </ul>
+        </details>
+        <button type="button" class="primary-btn full" data-close>Close</button>
+      </div>`;
+    box.addEventListener("click", (e) => {
+      if (e.target === box || e.target.closest("[data-close]")) box.remove();
+    });
+    document.body.appendChild(box);
+  }
+
+  const badgeTile = (key, owned) => {
+    const [icon, name, how] = BADGES[key];
+    return `<div class="badge-tile${owned ? "" : " locked"}" title="${escapeHtml(how)}">
+      <span class="badge-icon">${icon}</span>
+      <strong>${escapeHtml(name)}</strong>
+      <small>${owned ? "Earned" : escapeHtml(how)}</small>
+    </div>`;
+  };
+  async function renderMyProgress() {
+    const box = $("myProgress");
+    if (!box || !currentUser) return;
+    await loadChatStats();
+    const all = [...chatStats.values()];
+    const total = all.reduce((n, x) => n + x.score, 0);
+    const best = all.reduce((n, x) => Math.max(n, x.best), 0);
+    const active = all.filter((x) => x.streak > 0).length;
+    const { data } = await supabase.rpc("get_user_badges", {
+      target_user: currentUser.id,
+    });
+    const owned = new Set((data || []).map((b) => b.badge_key));
+    box.innerHTML = `
+      <div class="stats-tiles">
+        <div><strong>⭐ ${total}</strong><span>Total score</span></div>
+        <div><strong>🔥 ${active}</strong><span>Active streaks</span></div>
+        <div><strong>🏅 ${best}</strong><span>Best streak</span></div>
+      </div>
+      <p class="tiny muted">Badges · ${owned.size} of ${Object.keys(BADGES).length}</p>
+      <div class="badge-grid">${Object.keys(BADGES)
+        .map((k) => badgeTile(k, owned.has(k)))
+        .join("")}</div>`;
+  }
+  async function renderPeerBadges(p) {
+    const box = $("peerBadges");
+    if (!box) return;
+    box.innerHTML = "";
+    const { data } = await supabase.rpc("get_user_badges", {
+      target_user: p.id,
+    });
+    if (profilePeer?.id !== p.id) return;
+    const keys = (data || []).map((b) => b.badge_key).filter((k) => BADGES[k]);
+    box.innerHTML = keys.length
+      ? `<div class="badge-grid">${keys.map((k) => badgeTile(k, true)).join("")}</div>`
+      : '<p class="tiny muted">No badges yet.</p>';
+  }
+  function startBadgeListener() {
+    if (badgeChannel || !currentUser) return;
+    badgeChannel = supabase
+      .channel("badges-" + currentUser.id)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "user_badges",
+          filter: `user_id=eq.${currentUser.id}`,
+        },
+        (payload) => {
+          const b = BADGES[payload.new.badge_key];
+          if (b) toast(`🏅 New badge: ${b[1]}!`);
+          if (!$("profilePanel").classList.contains("hidden"))
+            renderMyProgress();
+        },
+      )
+      .subscribe();
+  }
+
   async function loadChats() {
     let { data: rows, error } = await supabase.rpc("get_my_chats");
     if (error) {
@@ -335,11 +566,13 @@
     );
     watchChatList();
     await loadBlocks();
+    await loadChatStats();
 
     const allPeers = peers
       .map((peer) => ({
         ...peer,
         preferences: preferences.get(peer.conversationId) || {},
+        stats: chatStats.get(peer.conversationId) || null,
       }))
       .filter((peer) => !peer.preferences.is_deleted)
       .sort((a, b) => {
@@ -396,6 +629,7 @@
     setListView(
       showingLocked ? "locked" : showingArchivedChats ? "archived" : "recent",
     );
+    renderStatsChip();
   }
 
   function renderChatList(list, peers, emptyMessage) {
@@ -423,7 +657,11 @@
       item.setAttribute("role", "button");
       item.setAttribute("tabindex", "0");
 
-      const markers = [prefs.is_pinned ? "📌" : "", prefs.is_muted ? "🔕" : ""]
+      const markers = [
+        prefs.is_pinned ? "📌" : "",
+        prefs.is_muted ? "🔕" : "",
+        statMarks(peer.stats),
+      ]
         .filter(Boolean)
         .join(" ");
 
@@ -732,6 +970,7 @@
     $("peerName").textContent = peerName(peer);
     setAvatar($("peerAvatar"), peer);
     refreshPeerStatus();
+    renderStatsChip();
     $("welcomePanel").classList.add("hidden");
     $("messages").classList.remove("hidden");
     $("composer").classList.remove("hidden");
@@ -754,8 +993,6 @@
       reactionsChannel = null;
     }
 
-    reactionCache.clear();
-    messageCache.clear();
     realtimeChannel = supabase
       .channel("messages-" + conversationId)
       .on(
@@ -881,6 +1118,8 @@
 
     renderPendingFor(activeConversation);
     scrollMessages();
+    // Load the reactions for the messages that were just drawn.
+    refreshVisibleReactions();
   }
   // =========================================
   // MESSAGE REACTIONS
@@ -1031,6 +1270,14 @@
 
       options.classList.toggle("hidden", !opening);
 
+      // Near the top of the chat there is no room above, so open downwards.
+      if (opening) {
+        const room =
+          pickerButton.getBoundingClientRect().top -
+          $("messages").getBoundingClientRect().top;
+        options.classList.toggle("down", room < 70);
+      }
+
       pickerButton.setAttribute("aria-expanded", String(opening));
 
       // Keep the emoji bar fully on screen.
@@ -1081,7 +1328,9 @@
       }
     } catch (error) {
       console.error("Reaction update failed:", error);
-      toast("Couldn't save reaction: " + (error.message || "Please try again."));
+      toast(
+        "Couldn't save reaction: " + (error.message || "Please try again."),
+      );
     }
   }
 
@@ -3001,6 +3250,7 @@
       ? "Unblock user"
       : "Block user";
     $("peerProfilePanel").classList.remove("hidden");
+    renderPeerBadges(p);
   }
   $("peerProfileAvatar").addEventListener("click", (e) => {
     if (e.currentTarget.dataset.url) openLightbox(e.currentTarget.dataset.url);
@@ -3374,6 +3624,11 @@
       supabase.removeChannel(listChannel);
       listChannel = null;
     }
+    if (badgeChannel) {
+      supabase.removeChannel(badgeChannel);
+      badgeChannel = null;
+    }
+    chatStats = new Map();
     if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
     await supabase.auth.signOut();
     currentUser = currentProfile = activePeer = activeConversation = null;
@@ -3478,6 +3733,7 @@
       $("profileUsername").textContent = currentProfile.username;
       $("displayNameInput").value = currentProfile.display_name || "";
       $("bioInput").value = currentProfile.bio || "";
+      renderMyProgress();
     }
   }
   document
@@ -3546,7 +3802,8 @@
   const accountEmailInput = $("accountEmailInput");
   const accountEmailStatus = $("accountEmailStatus");
   function showRecoveryEmail() {
-    if (accountEmailInput) accountEmailInput.value = appSettings.recovery_email || "";
+    if (accountEmailInput)
+      accountEmailInput.value = appSettings.recovery_email || "";
     if (accountEmailStatus)
       accountEmailStatus.textContent = appSettings.recovery_email
         ? "Saved. It will be used only to help you recover your account."
@@ -3788,7 +4045,9 @@
       .select("contact_id, custom_name")
       .eq("owner_id", currentUser.id);
     if (error) return;
-    contactNames = new Map((data || []).map((r) => [r.contact_id, r.custom_name]));
+    contactNames = new Map(
+      (data || []).map((r) => [r.contact_id, r.custom_name]),
+    );
     loadChats();
   }
   $("saveContactNameBtn")?.addEventListener("click", async () => {
@@ -3797,17 +4056,23 @@
     const { error } = name
       ? await supabase
           .from("contact_names")
-          .upsert({ owner_id: currentUser.id, contact_id: profilePeer.id, custom_name: name })
+          .upsert({
+            owner_id: currentUser.id,
+            contact_id: profilePeer.id,
+            custom_name: name,
+          })
       : await supabase
           .from("contact_names")
           .delete()
           .eq("owner_id", currentUser.id)
           .eq("contact_id", profilePeer.id);
-    if (error) return toast("Could not save the contact name: " + error.message);
+    if (error)
+      return toast("Could not save the contact name: " + error.message);
     if (name) contactNames.set(profilePeer.id, name);
     else contactNames.delete(profilePeer.id);
     $("peerProfileName").textContent = peerName(profilePeer);
-    if (activePeer?.id === profilePeer.id) $("peerName").textContent = peerName(activePeer);
+    if (activePeer?.id === profilePeer.id)
+      $("peerName").textContent = peerName(activePeer);
     loadChats();
     toast(name ? "Contact name saved." : "Contact name removed.");
   });
@@ -3861,6 +4126,7 @@
     applyAppearance();
     startPresence();
     startCallListener();
+    startBadgeListener();
     loadContactNames();
     openProfileFromLink();
   }
@@ -3952,27 +4218,37 @@
 
   async function savePushSubscription(subscription) {
     const json = subscription.toJSON();
-    const { error } = await supabase.from("push_subscriptions").upsert({
-      user_id: currentUser.id,
-      endpoint: json.endpoint,
-      p256dh: json.keys?.p256dh,
-      auth: json.keys?.auth,
-      user_agent: navigator.userAgent.slice(0, 500),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "endpoint" });
+    const { error } = await supabase.from("push_subscriptions").upsert(
+      {
+        user_id: currentUser.id,
+        endpoint: json.endpoint,
+        p256dh: json.keys?.p256dh,
+        auth: json.keys?.auth,
+        user_agent: navigator.userAgent.slice(0, 500),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "endpoint" },
+    );
     if (error) throw error;
   }
 
   async function enablePushNotifications() {
-    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window))
-      throw new Error("This browser does not support background push notifications.");
+    if (
+      !("Notification" in window) ||
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window)
+    )
+      throw new Error(
+        "This browser does not support background push notifications.",
+      );
     if (!window.isSecureContext)
       throw new Error("Push notifications require HTTPS (or localhost).");
     if (!PUSH_PUBLIC_KEY || PUSH_PUBLIC_KEY.includes("PASTE_"))
       throw new Error("Add your VAPID public key to config.js first.");
 
     const permission = await Notification.requestPermission();
-    if (permission !== "granted") throw new Error("Allow notifications in your browser settings.");
+    if (permission !== "granted")
+      throw new Error("Allow notifications in your browser settings.");
 
     const registration = await navigator.serviceWorker.ready;
     let subscription = await registration.pushManager.getSubscription();
@@ -3993,8 +4269,15 @@
       if (subscription) {
         const endpoint = subscription.endpoint;
         await subscription.unsubscribe();
-        const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
-        if (error) console.warn("Could not remove push subscription from database:", error);
+        const { error } = await supabase
+          .from("push_subscriptions")
+          .delete()
+          .eq("endpoint", endpoint);
+        if (error)
+          console.warn(
+            "Could not remove push subscription from database:",
+            error,
+          );
       }
     }
   }
@@ -4006,7 +4289,8 @@
       if (enabled) {
         await enablePushNotifications();
         const saved = await saveSetting({ notifications_enabled: true });
-        if (!saved) throw new Error("Could not save your notification setting.");
+        if (!saved)
+          throw new Error("Could not save your notification setting.");
         toast("Background notifications are enabled on this device.");
       } else {
         await disablePushNotifications();

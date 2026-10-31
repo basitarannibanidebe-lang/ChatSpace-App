@@ -228,6 +228,7 @@
             <div>
               <h2 id="peerName">Welcome to ChatSpace</h2>
               <p id="peerStatus">Choose someone to start chatting</p>
+              <div id="chatStatsBar" class="chat-stats-bar hidden"></div>
             </div>
           </div>
           <div class="header-actions">
@@ -423,6 +424,10 @@
             <input id="avatarInput" type="file" accept="image/*" hidden />
           </div>
           <p class="tiny muted">@<span id="profileUsername"></span></p>
+          <h3 class="setting-title">Your progress</h3>
+          <div id="myProgress" class="progress-box">
+            <p class="tiny muted">Loading…</p>
+          </div>
           <label for="displayNameInput">Display name</label>
           <input
             id="displayNameInput"
@@ -578,6 +583,8 @@
           </div>
           <h3 class="setting-title">About</h3>
           <p id="peerProfileBio" class="muted"></p>
+          <h3 class="setting-title">Badges</h3>
+          <div id="peerBadges" class="progress-box"></div>
           <label for="contactNameInput">Contact name (only you see this)</label>
           <input
             id="contactNameInput"
