@@ -304,6 +304,275 @@
   }
 
   // =========================================
+  // VIEW ONCE (photos, videos, voice notes)
+  // =========================================
+  let viewOnceOn = false,
+    originalPicked = null,
+    viewOnceViews = new Map(),
+    viewChannel = null;
+
+  function syncViewOnceBtn() {
+    const b = $("viewOnceBtn");
+    if (!b) return;
+    b.classList.toggle("on", viewOnceOn);
+    b.setAttribute("aria-pressed", String(viewOnceOn));
+  }
+  $("viewOnceBtn")?.addEventListener("click", () => {
+    viewOnceOn = !viewOnceOn;
+    syncViewOnceBtn();
+    toast(
+      viewOnceOn
+        ? "View once is ON. Your next photo, video or voice note can be opened one time."
+        : "View once is off.",
+    );
+  });
+
+  const viewOnceKind = (msg) =>
+    msg.attachment_type === "video"
+      ? ["🎬", "Video"]
+      : msg.attachment_type === "audio"
+        ? ["🎙", "Voice note"]
+        : ["📷", "Photo"];
+
+  function viewOnceCardHtml(msg, mine) {
+    const tidy = (h) => h.replace(/\s*\n\s*/g, "");
+    const id = escapeHtml(String(msg.id));
+    const [icon, label] = viewOnceKind(msg);
+    const seen = viewOnceViews.get(String(msg.id)) || new Set();
+    if (mine) {
+      const opened = [...seen].some((v) => v !== currentUser.id);
+      return tidy(`<button type="button" class="view-once-card mine" data-id="${id}">
+        <span class="vo-ico">${icon}</span>
+        <span><strong>${label} · View once</strong>
+        <small>${opened ? "Opened ✓" : "Not opened yet"} · tap to see your copy</small></span></button>`);
+    }
+    if (seen.has(currentUser.id)) {
+      return tidy(`<div class="view-once-card done" data-id="${id}">
+        <span class="vo-ico">👁</span>
+        <span><strong>Opened</strong><small>${label} · can't be opened again</small></span></div>`);
+    }
+    return tidy(`<button type="button" class="view-once-card" data-id="${id}">
+      <span class="vo-ico">${icon}</span>
+      <span><strong>${label} · View once</strong><small>Tap to open</small></span></button>`);
+  }
+
+  async function loadViewOnceViews(msgs) {
+    viewOnceViews = new Map();
+    const ids = msgs.filter((m) => m.view_once).map((m) => String(m.id));
+    if (!ids.length) return;
+    const { data, error } = await supabase
+      .from("message_views")
+      .select("message_id,viewer_id")
+      .in("message_id", ids);
+    if (error || !data) return;
+    for (const r of data) {
+      const k = String(r.message_id);
+      if (!viewOnceViews.has(k)) viewOnceViews.set(k, new Set());
+      viewOnceViews.get(k).add(r.viewer_id);
+    }
+  }
+  function noteViewed(messageId, viewerId) {
+    const k = String(messageId);
+    if (!viewOnceViews.has(k)) viewOnceViews.set(k, new Set());
+    viewOnceViews.get(k).add(viewerId);
+    const el = document.querySelector(
+      `.view-once-card[data-id="${CSS.escape(k)}"]`,
+    );
+    const msg = messageCache.get(k);
+    if (el && msg)
+      el.outerHTML = viewOnceCardHtml(msg, msg.sender_id === currentUser.id);
+  }
+  function startViewListener() {
+    if (viewChannel || !currentUser) return;
+    viewChannel = supabase
+      .channel("views-" + currentUser.id)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "message_views" },
+        (payload) => noteViewed(payload.new.message_id, payload.new.viewer_id),
+      )
+      .subscribe();
+  }
+
+  $("messages")?.addEventListener("click", (event) => {
+    const card = event.target.closest("button.view-once-card");
+    if (!card) return;
+    openViewOnce(messageCache.get(card.dataset.id));
+  });
+
+  async function openViewOnce(msg) {
+    if (!msg) return;
+    if (!navigator.onLine)
+      return toast("You need an internet connection to open this.");
+    const mine = msg.sender_id === currentUser.id;
+    let path = msg.attachment_path;
+    if (!mine) {
+      const { data, error } = await supabase.rpc("open_view_once", {
+        target_message_id: msg.id,
+      });
+      if (error) {
+        if (/already/i.test(error.message)) {
+          noteViewed(msg.id, currentUser.id);
+          return toast("You've already opened this one.");
+        }
+        return toast("Couldn't open it: " + error.message);
+      }
+      if (data) path = data;
+    }
+    if (!path) return toast("This file is no longer available.");
+    const { data: signed, error: signError } = await supabase.storage
+      .from("chat-attachments")
+      .createSignedUrl(path, 600);
+    if (signError || !signed?.signedUrl)
+      return toast("Couldn't load it. Check your connection and tap again.");
+    let safe = "";
+    try {
+      const u = new URL(signed.signedUrl);
+      if (u.protocol === "https:" && u.origin === SUPA_ORIGIN) safe = u.href;
+    } catch {}
+    if (!safe) return toast("Couldn't load it.");
+    showViewOnceViewer(msg, safe, mine);
+    if (!mine) noteViewed(msg.id, currentUser.id);
+  }
+
+  function showViewOnceViewer(msg, url, mine) {
+    document.querySelectorAll(".vo-viewer").forEach((n) => n.remove());
+    const box = document.createElement("div");
+    box.className = "vo-viewer";
+    const safeUrl = escapeHtml(url);
+    const media =
+      msg.attachment_type === "video"
+        ? `<video src="${safeUrl}" controls autoplay playsinline controlslist="nodownload noremoteplayback" disablepictureinpicture></video>`
+        : msg.attachment_type === "audio"
+          ? `<div class="vo-audio">🎙<audio src="${safeUrl}" controls autoplay controlslist="nodownload"></audio></div>`
+          : `<img src="${safeUrl}" alt="View once photo" draggable="false">`;
+    box.innerHTML = `
+      <div class="vo-bar">
+        <span>👁 View once${mine ? " · your copy" : ""}</span>
+        <button type="button" class="ghost-btn" data-close>Close</button>
+      </div>
+      <div class="vo-body">${media}</div>
+      <p class="vo-note">${
+        mine
+          ? "Only you can open this again."
+          : "This can't be opened again after you close it."
+      }</p>`;
+    box.addEventListener("contextmenu", (e) => e.preventDefault());
+    box.addEventListener("click", (e) => {
+      if (e.target.closest("[data-close]")) {
+        box.querySelectorAll("video,audio").forEach((m) => m.pause());
+        box.remove();
+      }
+    });
+    document.body.appendChild(box);
+  }
+
+  // =========================================
+  // WHAT'S NEW (shown once per person, also in Settings)
+  // =========================================
+  const WHATS_NEW_VERSION = "2026-11-d";
+  const NEW_FEATURES = [
+    [
+      "🔥",
+      "Streaks, scores and badges",
+      "Message a friend every day to grow a streak. Chats earn points and levels, and you collect badges. Tap the 🔥 chip inside a chat.",
+    ],
+    [
+      "①",
+      "View once",
+      "Tap the ① button before sending a photo, video or voice note. The other person can open it one time. You can always open your own copy.",
+    ],
+    [
+      "✨",
+      "Improve photos before sending",
+      "Auto-enhance, adjust, rotate, and choose Original, HD or Data saver. Videos are sent in their original quality.",
+    ],
+    [
+      "🔗",
+      "Share profiles",
+      "Share your own profile link, or a friend's, from the Profile page.",
+    ],
+    [
+      "📇",
+      "Contact names",
+      "Save a friend under your own name. Only you see it.",
+    ],
+    [
+      "👆",
+      "Faster chatting",
+      "Swipe a message to reply. Press and hold, or right-click, for edit, delete and more.",
+    ],
+    [
+      "🔠",
+      "Text size and full screen",
+      "Find both in Settings. Files can now be up to 50 MB.",
+    ],
+  ];
+  function maybeShowWhatsNew() {
+    if (!currentUser) return;
+    if (
+      localStorage.getItem("chatspace-whatsnew-" + currentUser.id) ===
+      WHATS_NEW_VERSION
+    )
+      return;
+    if (document.querySelector(".whatsnew-backdrop, .vo-viewer, .camera-modal"))
+      return;
+    showWhatsNew();
+  }
+  function showWhatsNew() {
+    document.querySelectorAll(".whatsnew-backdrop").forEach((n) => n.remove());
+    const box = document.createElement("div");
+    box.className = "whatsnew-backdrop";
+    const hasEmail = Boolean(appSettings?.recovery_email);
+    box.innerHTML = `
+      <div class="whatsnew-sheet" role="dialog" aria-label="What's new">
+        <h2>What's new in ChatSpace</h2>
+        <ul class="whatsnew-list">${NEW_FEATURES.map(
+          ([icon, title, text]) =>
+            `<li><span class="wn-ico">${icon}</span><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(text)}</p></div></li>`,
+        ).join("")}</ul>
+        <div class="whatsnew-email">
+          <strong>📧 Recovery email <em>(optional)</em></strong>
+          <p>Add an email in case you ever forget your password. It's private, you don't have to, and you can change or remove it any time in Settings. Password recovery by email is coming soon.</p>
+          <input id="wnEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${escapeHtml(appSettings?.recovery_email || "")}" />
+          <div class="wn-row">
+            <button type="button" class="primary-btn" data-wn="save">${hasEmail ? "Update email" : "Save email"}</button>
+            <button type="button" class="ghost-btn" data-wn="skip">Not now</button>
+          </div>
+          <p class="tiny muted" id="wnStatus" role="status"></p>
+        </div>
+        <button type="button" class="primary-btn full" data-wn="done">Got it</button>
+      </div>`;
+    const finish = () => {
+      localStorage.setItem(
+        "chatspace-whatsnew-" + currentUser.id,
+        WHATS_NEW_VERSION,
+      );
+      box.remove();
+    };
+    box.addEventListener("click", async (e) => {
+      const act = e.target.closest("[data-wn]")?.dataset.wn;
+      if (act === "done" || act === "skip") return finish();
+      if (act === "save") {
+        const email = box.querySelector("#wnEmail").value.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))
+          return (box.querySelector("#wnStatus").textContent =
+            "Enter a valid email address, or tap Not now.");
+        const ok = await saveSetting({ recovery_email: email });
+        box.querySelector("#wnStatus").textContent = ok
+          ? "Saved. Thank you!"
+          : "Couldn't save it right now. You can add it later in Settings.";
+        if (ok) {
+          showRecoveryEmail();
+          setTimeout(finish, 900);
+        }
+      }
+    });
+    document.body.appendChild(box);
+  }
+  $("whatsNewBtn")?.addEventListener("click", showWhatsNew);
+
+  // =========================================
   // CHAT SCORES, STAGES, STREAKS AND BADGES
   // (numbers are calculated by the database; the app only shows them)
   // =========================================
@@ -1044,7 +1313,9 @@
   };
   async function resolveAttachments(msgs) {
     const todo = msgs
-      .filter((m) => m.attachment_url && !m.deleted_for_everyone)
+      .filter(
+        (m) => m.attachment_url && !m.deleted_for_everyone && !m.view_once,
+      )
       .map((m) => ({
         m,
         path: m.attachment_path || pathFromUrl(m.attachment_url),
@@ -1100,6 +1371,7 @@
     }
 
     await resolveAttachments(data || []);
+    await loadViewOnceViews(data || []);
     cacheMessages(activeConversation, data || [], [...hiddenIds]);
 
     // Cache every loaded message so replies can still find their originals.
@@ -1479,7 +1751,11 @@
 
         let originalText = original.content || "";
 
-        if (original.attachment_type === "image") {
+        if (original.view_once) {
+          originalText = "👁 View once";
+        } else if (original.attachment_type === "video") {
+          originalText = originalText || "🎬 Video";
+        } else if (original.attachment_type === "image") {
           originalText = originalText || "📷 Image";
         } else if (original.attachment_type === "audio") {
           originalText = originalText || "🎙 Voice note";
@@ -1522,7 +1798,9 @@
       body += `<div>${escapeHtml(msg.content)}</div>`;
     }
 
-    if (msg.attachment_url) {
+    if (msg.view_once && !msg.deleted_for_everyone) {
+      body += viewOnceCardHtml(msg, mine);
+    } else if (msg.attachment_url) {
       let raw = "";
       try {
         const u = new URL(msg.attachment_url);
@@ -1545,6 +1823,8 @@
       src="${url}"
     ></audio>
   `;
+      } else if (msg.attachment_type === "video") {
+        body += `<video class="chat-video" controls playsinline preload="metadata" src="${url}"></video>`;
       } else if (msg.attachment_type === "image") {
         body += `
     <img
@@ -1766,7 +2046,11 @@
 
     let text = msg.content || "";
 
-    if (msg.attachment_type === "image") {
+    if (msg.view_once) {
+      text = "👁 View once";
+    } else if (msg.attachment_type === "video") {
+      text = text || "🎬 Video";
+    } else if (msg.attachment_type === "image") {
       text = text || "📷 Image";
     } else if (msg.attachment_type === "audio") {
       text = text || "🎙 Voice note";
@@ -1919,6 +2203,7 @@
     content = "",
     attachment = null,
     attachmentType = null,
+    options = {},
   ) {
     if (!activeConversation) {
       toast("Choose a conversation first.");
@@ -1932,6 +2217,7 @@
     let attachmentPathValue = null,
       attachmentUrl = null,
       finalContent = content.trim();
+    const viewOnce = Boolean(options.viewOnce && attachment);
     if (attachment) {
       if (attachment.size > 50 * 1024 * 1024) {
         toast("File is larger than 50 MB.");
@@ -1954,17 +2240,24 @@
         toast("File upload failed: " + uploadError.message);
         return;
       }
-      const { data: signed, error: signedError } = await supabase.storage
-        .from("chat-attachments")
-        .createSignedUrl(path, 60 * 60 * 24 * 7);
-      if (signedError) {
-        toast("Could not create file link: " + signedError.message);
-        return;
+      if (viewOnce) {
+        // No link is stored: the other person gets access only when they open it.
+        attachmentUrl = "https://view-once.invalid/hidden";
+        attachmentPathValue = path;
+        finalContent = "";
+      } else {
+        const { data: signed, error: signedError } = await supabase.storage
+          .from("chat-attachments")
+          .createSignedUrl(path, 60 * 60 * 24 * 7);
+        if (signedError) {
+          toast("Could not create file link: " + signedError.message);
+          return;
+        }
+        attachmentUrl = signed.signedUrl;
+        attachmentPathValue = path;
+        if (attachmentType !== "audio")
+          finalContent = attachment.name || "Shared file";
       }
-      attachmentUrl = signed.signedUrl;
-      attachmentPathValue = path;
-      if (attachmentType !== "audio")
-        finalContent = attachment.name || "Shared file";
     }
     if (!attachment && !navigator.onLine) return queueMessage(finalContent);
     const { error } = await supabase.from("messages").insert({
@@ -1975,6 +2268,7 @@
       attachment_path: attachmentPathValue,
       attachment_type: attachment ? attachmentType : null,
       reply_to: replyingToMessage?.id || null,
+      ...(viewOnce ? { view_once: true } : {}),
     });
     if (error && !attachment && isNetworkError(error))
       return queueMessage(finalContent);
@@ -1999,13 +2293,23 @@
     try {
       if (selectedFile) {
         const file = selectedFile;
-        const type = file.type.startsWith("image/") ? "image" : "file";
+        const type = file.type.startsWith("image/")
+          ? "image"
+          : file.type.startsWith("video/")
+            ? "video"
+            : "file";
+        if (viewOnceOn && type === "file") {
+          toast(
+            "View once works for photos, videos and voice notes. Turn it off to send this file.",
+          );
+          return;
+        }
 
-        await sendMessage("", file, type);
+        await sendMessage("", file, type, { viewOnce: viewOnceOn });
 
-        selectedFile = null;
-        $("fileInput").value = "";
-        $("attachmentPreview").classList.add("hidden");
+        viewOnceOn = false;
+        syncViewOnceBtn();
+        clearAttachment();
       } else {
         const text = $("messageInput").value.trim();
 
@@ -3542,26 +3846,58 @@
     $("fileInput").dispatchEvent(new Event("change"));
   });
 
-  $("fileInput").addEventListener("change", (event) => {
-    selectedFile = event.target.files?.[0] || null;
-
+  function clearAttachment() {
+    selectedFile = null;
+    originalPicked = null;
+    $("fileInput").value = "";
+    renderAttachmentPreview();
+  }
+  function renderAttachmentPreview() {
+    const box = $("attachmentPreview");
     if (!selectedFile) {
-      $("attachmentPreview").classList.add("hidden");
+      box.classList.add("hidden");
+      box.innerHTML = "";
       return;
     }
+    const mb = selectedFile.size / (1024 * 1024);
+    const size =
+      mb >= 1
+        ? mb.toFixed(1) + " MB"
+        : Math.max(1, Math.round(selectedFile.size / 1024)) + " KB";
+    const isImage = window.ChatSpaceEnhance?.canEdit(selectedFile);
+    const isVideo = selectedFile.type.startsWith("video/");
+    box.innerHTML = `<span class="att-name">${isVideo ? "🎬" : isImage ? "📷" : "📎"} ${escapeHtml(selectedFile.name)} · ${size}${isVideo ? " · original quality" : ""}</span>
+      ${isImage && originalPicked ? '<button type="button" class="enh-link" data-att="edit">✨ Improve</button>' : ""}
+      <button type="button" class="enh-link" data-att="clear" aria-label="Remove attachment">✕</button>`;
+    box.classList.remove("hidden");
+  }
+  $("attachmentPreview").addEventListener("click", async (event) => {
+    const act = event.target.closest("[data-att]")?.dataset.att;
+    if (act === "clear") return clearAttachment();
+    if (act === "edit" && originalPicked) {
+      const edited = await window.ChatSpaceEnhance.open(originalPicked);
+      if (edited) {
+        selectedFile = edited;
+        renderAttachmentPreview();
+      }
+    }
+  });
 
-    if (selectedFile.size > 50 * 1024 * 1024) {
+  $("fileInput").addEventListener("change", async (event) => {
+    let file = event.target.files?.[0] || null;
+    if (!file) return clearAttachment();
+    if (file.size > 50 * 1024 * 1024) {
       toast("Choose a file smaller than 50 MB.");
-      selectedFile = null;
-      event.target.value = "";
-      $("attachmentPreview").classList.add("hidden");
-      return;
+      return clearAttachment();
     }
-
-    $("attachmentPreview").textContent =
-      `Ready to share: ${selectedFile.name} — press Send to upload`;
-
-    $("attachmentPreview").classList.remove("hidden");
+    originalPicked = file;
+    if (window.ChatSpaceEnhance?.canEdit(file)) {
+      const edited = await window.ChatSpaceEnhance.open(file);
+      if (!edited) return clearAttachment(); // cancelled in the editor
+      file = edited;
+    }
+    selectedFile = file;
+    renderAttachmentPreview();
   });
 
   $("recordBtn").addEventListener("click", async () => {
@@ -3601,7 +3937,10 @@
             type: blob.type,
           }),
           "audio",
+          { viewOnce: viewOnceOn },
         );
+        viewOnceOn = false;
+        syncViewOnceBtn();
       };
       mediaRecorder.start();
       $("recordBtn").classList.add("recording");
@@ -3627,6 +3966,10 @@
     if (badgeChannel) {
       supabase.removeChannel(badgeChannel);
       badgeChannel = null;
+    }
+    if (viewChannel) {
+      supabase.removeChannel(viewChannel);
+      viewChannel = null;
     }
     chatStats = new Map();
     if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
@@ -4127,6 +4470,8 @@
     startPresence();
     startCallListener();
     startBadgeListener();
+    startViewListener();
+    setTimeout(() => maybeShowWhatsNew(), 1800);
     loadContactNames();
     openProfileFromLink();
   }

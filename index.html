@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="./style.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
+    <script src="./enhance.js" defer></script>
     <script src="./app.js" defer></script>
     <style>
       #netlify-badge,
@@ -330,7 +331,7 @@
               id="fileInput"
               type="file"
               hidden
-              accept="image/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.csv"
+              accept="image/*,video/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.csv"
             />
 
             <label
@@ -362,10 +363,20 @@
               hidden
             />
 
+            <button
+              id="viewOnceBtn"
+              class="attach-btn view-once-toggle"
+              type="button"
+              title="View once: the next photo, video or voice note can be opened one time"
+              aria-label="View once"
+              aria-pressed="false"
+            >
+              <span class="vo-dot">1</span>
+            </button>
             <textarea
               id="messageInput"
               rows="1"
-              placeholder="Write a message..."
+              placeholder="Message…"
               aria-label="Write a message"
             ></textarea>
 
@@ -476,6 +487,9 @@
             Update account information
           </button>
           <p id="accountEmailStatus" class="tiny muted" role="status"></p>
+          <button id="whatsNewBtn" class="ghost-btn full" type="button">
+            ✨ What's new in ChatSpace
+          </button>
           <h3 class="setting-title">Interface size</h3>
           <label class="setting-row" for="textScaleInput"
             ><span

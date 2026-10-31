@@ -1,9 +1,10 @@
-const CACHE_NAME = "chatspace-v6-polish";
+const CACHE_NAME = "chatspace-v7-viewonce";
 const APP_FILES = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
+  "/enhance.js",
   "/manifest.json",
   "/config.js",
 ];
