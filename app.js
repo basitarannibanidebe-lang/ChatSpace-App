@@ -1036,8 +1036,8 @@
     container.appendChild(picker);
   }
 
-  // Add, remove, or change a reaction through the secured Supabase RPC.
-  // Direct table writes are intentionally disabled by the database policies.
+  // Add a reaction, remove your existing reaction,
+  // or change it to a different emoji.
   async function toggleReaction(message, emoji) {
     if (!currentUser || !activeConversation) {
       toast("Choose a conversation first.");
@@ -1050,7 +1050,7 @@
     }
 
     if (!REACTION_EMOJIS.includes(emoji)) {
-      toast("That reaction is not supported.");
+      toast("That reaction isn't supported.");
       return;
     }
 
@@ -1061,18 +1061,15 @@
         target_message_id: message.id,
         target_emoji: emoji,
       });
-
       if (error) throw error;
 
-      // Refresh only if the user is still viewing the same conversation.
+      // Don't refresh a different conversation if the user switched chats.
       if (conversationId === activeConversation) {
         await refreshVisibleReactions();
       }
     } catch (error) {
       console.error("Reaction update failed:", error);
-      toast(
-        "Couldn't send reaction: " + (error.message || "Please try again."),
-      );
+      toast("Couldn't save reaction: " + (error.message || "Please try again."));
     }
   }
 
@@ -1969,18 +1966,35 @@
       payload,
     });
 
+  let callRingtoneAudio = null;
   function startRing() {
     stopRing();
-    beep();
-    ringTimer = setInterval(() => {
+    // Custom ringtone plays while the app is open and the call is ringing.
+    callRingtoneAudio = new Audio("/sounds/chatspace-ringtone.mp3");
+    callRingtoneAudio.loop = true;
+    callRingtoneAudio.volume = 0.8;
+    callRingtoneAudio.play().catch(() => {
+      // Browsers may block autoplay until the user interacts with the page.
       beep();
-      setTimeout(beep, 350);
-      if (call?.role === "callee") navigator.vibrate?.([300, 150, 300]);
-    }, 2200);
+      ringTimer = setInterval(() => beep(), 2200);
+    });
+    if (call?.role === "callee") {
+      navigator.vibrate?.([350, 180, 350, 500]);
+      ringTimer = setInterval(() => {
+        if (call?.role === "callee" && call?.state === "ringing")
+          navigator.vibrate?.([350, 180, 350, 500]);
+      }, 2200);
+    }
   }
   function stopRing() {
     clearInterval(ringTimer);
     ringTimer = null;
+    if (callRingtoneAudio) {
+      callRingtoneAudio.pause();
+      callRingtoneAudio.currentTime = 0;
+      callRingtoneAudio = null;
+    }
+    navigator.vibrate?.(0);
   }
 
   function showCallScreen(status) {
@@ -3843,19 +3857,86 @@
   $("soundToggle").addEventListener("change", (e) =>
     saveSetting({ notification_sound: e.target.checked }),
   );
-  $("notifyToggle").addEventListener("change", async (e) => {
-    if (e.target.checked) {
-      if (!("Notification" in window)) {
-        e.target.checked = false;
-        return toast("This browser doesn't support notifications.");
-      }
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        e.target.checked = false;
-        return toast("Notifications are blocked in your browser settings.");
+  const PUSH_PUBLIC_KEY = cfg.VAPID_PUBLIC_KEY || "PASTE_VAPID_PUBLIC_KEY_HERE";
+
+  function urlBase64ToUint8Array(value) {
+    const padding = "=".repeat((4 - (value.length % 4)) % 4);
+    const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(base64);
+    return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+  }
+
+  async function savePushSubscription(subscription) {
+    const json = subscription.toJSON();
+    const { error } = await supabase.from("push_subscriptions").upsert({
+      user_id: currentUser.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys?.p256dh,
+      auth: json.keys?.auth,
+      user_agent: navigator.userAgent.slice(0, 500),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "endpoint" });
+    if (error) throw error;
+  }
+
+  async function enablePushNotifications() {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window))
+      throw new Error("This browser does not support background push notifications.");
+    if (!window.isSecureContext)
+      throw new Error("Push notifications require HTTPS (or localhost).");
+    if (!PUSH_PUBLIC_KEY || PUSH_PUBLIC_KEY.includes("PASTE_"))
+      throw new Error("Add your VAPID public key to config.js first.");
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Allow notifications in your browser settings.");
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(PUSH_PUBLIC_KEY),
+      });
+    }
+    await savePushSubscription(subscription);
+    return true;
+  }
+
+  async function disablePushNotifications() {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        const endpoint = subscription.endpoint;
+        await subscription.unsubscribe();
+        const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+        if (error) console.warn("Could not remove push subscription from database:", error);
       }
     }
-    saveSetting({ notifications_enabled: e.target.checked });
+  }
+
+  $("notifyToggle").addEventListener("change", async (e) => {
+    const enabled = e.target.checked;
+    e.target.disabled = true;
+    try {
+      if (enabled) {
+        await enablePushNotifications();
+        const saved = await saveSetting({ notifications_enabled: true });
+        if (!saved) throw new Error("Could not save your notification setting.");
+        toast("Background notifications are enabled on this device.");
+      } else {
+        await disablePushNotifications();
+        await saveSetting({ notifications_enabled: false });
+        toast("Notifications disabled on this device.");
+      }
+    } catch (error) {
+      e.target.checked = false;
+      await saveSetting({ notifications_enabled: false });
+      toast(error.message || "Could not configure notifications.");
+    } finally {
+      e.target.disabled = false;
+      renderSettingsUi();
+    }
   });
 
   function beep() {
