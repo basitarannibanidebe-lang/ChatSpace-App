@@ -72,6 +72,9 @@
             placeholder="At least 8 characters"
             required
           />
+          <button id="forgotBtn" class="link-btn forgot-btn" type="button">
+            Forgot password?
+          </button>
           <button id="authSubmit" class="primary-btn full" type="submit">
             Log in
           </button>
@@ -489,6 +492,22 @@
             Update account information
           </button>
           <p id="accountEmailStatus" class="tiny muted" role="status"></p>
+          <div id="emailVerifyRow" class="email-verify hidden">
+            <button id="sendEmailCodeBtn" class="ghost-btn" type="button">
+              Send code
+            </button>
+            <input
+              id="emailCodeInput"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6-digit code"
+              autocomplete="one-time-code"
+              aria-label="Verification code"
+            />
+            <button id="confirmEmailCodeBtn" class="primary-btn" type="button">
+              Verify
+            </button>
+          </div>
           <button id="whatsNewBtn" class="ghost-btn full" type="button">
             ✨ What's new in ChatSpace
           </button>

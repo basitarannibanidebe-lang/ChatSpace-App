@@ -1,3 +1,5 @@
+import { recoveryResponse } from "./recovery.js";
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -5,6 +7,12 @@ export default {
       return iceResponse(request, env);
     if (url.pathname === "/api/ai" && request.method === "POST")
       return aiResponse(request, env);
+    if (url.pathname.startsWith("/api/recovery/") && request.method === "POST")
+      return recoveryResponse(
+        request,
+        env,
+        url.pathname.slice("/api/recovery/".length),
+      );
     return env.ASSETS.fetch(request);
   },
 };

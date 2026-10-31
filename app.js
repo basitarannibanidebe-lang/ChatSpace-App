@@ -132,6 +132,7 @@
     $("loginTab").classList.toggle("active", !signup);
     $("signupTab").classList.toggle("active", signup);
     $("authSubmit").textContent = signup ? "Create account" : "Log in";
+    $("forgotBtn")?.classList.toggle("hidden", signup);
     $("password").autocomplete = signup ? "new-password" : "current-password";
     authMessage(
       signup ? "Username: 3–24 letters, numbers, or underscores." : "",
@@ -4142,28 +4143,142 @@
         toast("Sharing failed. Copy this link: " + shareUrl);
     }
   }
-  // Optional recovery email. It is saved with your settings and never replaces the
-  // sign-in address, so signing in with your username keeps working.
+  // Optional recovery email. It is saved with your settings, never replaces the
+  // sign-in address, and must be confirmed with a code before it can reset a password.
   const accountEmailInput = $("accountEmailInput");
   const accountEmailStatus = $("accountEmailStatus");
-  function showRecoveryEmail() {
-    if (accountEmailInput)
-      accountEmailInput.value = appSettings.recovery_email || "";
-    if (accountEmailStatus)
-      accountEmailStatus.textContent = appSettings.recovery_email
-        ? "Saved. It will be used only to help you recover your account."
-        : "Optional. Add one only if you want a way to recover your account.";
+
+  async function recoveryApi(route, body, withLogin) {
+    const headers = { "Content-Type": "application/json" };
+    if (withLogin) {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) headers.Authorization = `Bearer ${data.session.access_token}`;
+    }
+    let res;
+    try {
+      res = await fetch(`/api/recovery/${route}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch {
+      return { ok: false, error: "No connection. Try again." };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ...data, ok: res.ok };
   }
+
+  function showRecoveryEmail() {
+    const email = appSettings.recovery_email;
+    const verified = Boolean(email && appSettings.recovery_email_verified);
+    if (accountEmailInput) accountEmailInput.value = email || "";
+    if (accountEmailStatus)
+      accountEmailStatus.textContent = !email
+        ? "Optional. Add one only if you want a way to reset a forgotten password."
+        : verified
+          ? "✓ Verified. You can reset your password by email."
+          : "Saved, but not verified yet. Verify it so it can reset your password.";
+    $("emailVerifyRow")?.classList.toggle("hidden", !email || verified);
+  }
+
   $("saveAccountEmailBtn")?.addEventListener("click", async () => {
     const email = (accountEmailInput?.value || "").trim().toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))
       return toast("Enter a valid email address.");
+    const changed = email !== (appSettings.recovery_email || "");
     const ok = await saveSetting({ recovery_email: email || null });
     if (ok) {
-      toast(email ? "Recovery email saved." : "Recovery email removed.");
+      if (changed) appSettings.recovery_email_verified = false;
+      toast(email ? "Recovery email saved. Now verify it." : "Recovery email removed.");
       showRecoveryEmail();
     }
   });
+  $("sendEmailCodeBtn")?.addEventListener("click", async () => {
+    const btn = $("sendEmailCodeBtn");
+    btn.disabled = true;
+    const r = await recoveryApi("send-code", {}, true);
+    btn.disabled = false;
+    if (!r.ok) return toast(r.error || "Couldn't send the code.");
+    if (r.already) {
+      appSettings.recovery_email_verified = true;
+      return showRecoveryEmail();
+    }
+    toast("Code sent to " + r.sentTo + ". Check your inbox and spam folder.");
+    $("emailCodeInput")?.focus();
+  });
+  $("confirmEmailCodeBtn")?.addEventListener("click", async () => {
+    const code = ($("emailCodeInput").value || "").trim();
+    if (!/^\d{6}$/.test(code)) return toast("Enter the 6-digit code.");
+    const r = await recoveryApi("confirm", { code }, true);
+    if (!r.ok) return toast(r.error || "That code didn't work.");
+    appSettings.recovery_email_verified = true;
+    $("emailCodeInput").value = "";
+    showRecoveryEmail();
+    toast("Recovery email verified.");
+  });
+
+  // ---- Forgot password (reset with an emailed code) ----
+  function forgotPasswordFlow() {
+    const back = document.createElement("div");
+    back.className = "pin-backdrop";
+    back.innerHTML = `<div class="pin-box" role="dialog" aria-modal="true">
+      <h3>Reset your password</h3>
+      <div id="fpStep1">
+        <p class="tiny muted">Enter your username. If it has a verified recovery email, we'll send a 6-digit code there.</p>
+        <input id="fpUsername" autocomplete="username" autocapitalize="none" placeholder="Username" />
+      </div>
+      <div id="fpStep2" class="hidden">
+        <p class="tiny muted">If that account has a verified recovery email, a code is on its way (check spam too). It works for 10 minutes. Only accounts with a verified recovery email can reset this way.</p>
+        <input id="fpCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" />
+        <input id="fpPassword" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" />
+      </div>
+      <p class="tiny pin-error" id="fpError"></p>
+      <div class="pin-actions">
+        <button type="button" class="ghost-btn" id="fpCancel">Cancel</button>
+        <button type="button" class="primary-btn" id="fpGo">Send code</button>
+      </div>
+    </div>`;
+    document.body.appendChild(back);
+    const q = (id) => back.querySelector("#" + id);
+    const showError = (msg) => (q("fpError").textContent = msg || "");
+    q("fpUsername").value = ($("username")?.value || "").trim();
+    q("fpUsername").focus();
+    let step = 1;
+    q("fpCancel").onclick = () => back.remove();
+    q("fpGo").onclick = async () => {
+      showError("");
+      const btn = q("fpGo");
+      btn.disabled = true;
+      try {
+        const username = q("fpUsername").value.trim();
+        if (step === 1) {
+          if (username.length < 3) return showError("Enter your username.");
+          const r = await recoveryApi("request", { username }, false);
+          if (!r.ok) return showError(r.error || "Couldn't send the code.");
+          step = 2;
+          q("fpStep1").classList.add("hidden");
+          q("fpStep2").classList.remove("hidden");
+          btn.textContent = "Reset password";
+          q("fpCode").focus();
+        } else {
+          const r = await recoveryApi(
+            "reset",
+            { username, code: q("fpCode").value.trim(), newPassword: q("fpPassword").value },
+            false,
+          );
+          if (!r.ok) return showError(r.error || "Couldn't reset the password.");
+          back.remove();
+          if ($("username")) $("username").value = username;
+          if ($("password")) $("password").value = "";
+          setAuthMode(false);
+          toast("Password changed. You can log in now.");
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+  $("forgotBtn")?.addEventListener("click", forgotPasswordFlow);
   $("shareMyProfileBtn")?.addEventListener("click", () =>
     shareProfile(currentProfile),
   );

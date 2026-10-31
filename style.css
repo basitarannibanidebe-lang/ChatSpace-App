@@ -4242,3 +4242,30 @@ html[data-theme="light"] .enh-panel {
     height: 42px;
   }
 }
+
+/* ---- Forgot password and email verification ---- */
+.forgot-btn {
+  align-self: flex-end;
+  margin: -4px 0 2px;
+}
+.forgot-btn.hidden {
+  display: none;
+}
+.email-verify {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.email-verify.hidden {
+  display: none;
+}
+.email-verify input {
+  flex: 1;
+  min-width: 120px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+.pin-box input {
+  width: 100%;
+}
