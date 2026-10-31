@@ -910,6 +910,7 @@
           ${escapeHtml(emptyMessage)}
         </p>
       `;
+      window.ChatSpaceAI?.decorateList(list);
       return;
     }
 
@@ -980,6 +981,7 @@
 
       list.appendChild(item);
     }
+    window.ChatSpaceAI?.decorateList(list);
   }
 
   function showChatMenu(peer, anchor) {
@@ -4397,13 +4399,11 @@
     if (!profilePeer) return;
     const name = $("contactNameInput").value.trim();
     const { error } = name
-      ? await supabase
-          .from("contact_names")
-          .upsert({
-            owner_id: currentUser.id,
-            contact_id: profilePeer.id,
-            custom_name: name,
-          })
+      ? await supabase.from("contact_names").upsert({
+          owner_id: currentUser.id,
+          contact_id: profilePeer.id,
+          custom_name: name,
+        })
       : await supabase
           .from("contact_names")
           .delete()
@@ -4791,5 +4791,16 @@
       currentUser = session.user;
     });
   }
+  // Small bridge for ai.js (the AI assistant screen).
+  window.ChatSpaceApp = {
+    get supabase() {
+      return supabase;
+    },
+    get user() {
+      return currentUser;
+    },
+    toast,
+  };
+
   init();
 })();

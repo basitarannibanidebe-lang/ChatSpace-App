@@ -1,10 +1,12 @@
-const CACHE_NAME = "chatspace-v7-viewonce";
+const CACHE_NAME = "chatspace-v8-ai";
 const APP_FILES = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
   "/enhance.js",
+  "/ai.js",
+  "/ai.css",
   "/manifest.json",
   "/config.js",
 ];
