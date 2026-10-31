@@ -5,7 +5,7 @@
   "assets": {
     "directory": "./",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*"]
   },
   // Cloudflare Workers AI (free daily allowance). Powers /api/ai.
   "ai": { "binding": "AI" },
@@ -13,6 +13,6 @@
   "vars": {
     "SUPABASE_URL": "https://ylhcmgdjmlscgaweszxb.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_AslalGtw0WY08qI1-FjMQw_PYnSePUM",
-    "AI_DAILY_LIMIT": "25",
-  },
+    "AI_DAILY_LIMIT": "25"
+  }
 }
