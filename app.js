@@ -1988,6 +1988,19 @@
       }
     }
 
+    // Messages from the same person within a minute of each other stay close together.
+    const sentAt = new Date(msg.created_at).getTime();
+    const prevRow = $("messages").lastElementChild;
+    if (
+      prevRow?.classList.contains("message-row") &&
+      prevRow.dataset.sender === String(msg.sender_id) &&
+      Math.abs(sentAt - Number(prevRow.dataset.ts)) < 60000
+    ) {
+      row.classList.add("grouped");
+      prevRow.classList.add("group-has-next");
+    }
+    row.dataset.sender = String(msg.sender_id);
+    row.dataset.ts = String(sentAt);
     $("messages").appendChild(row);
     scrollMessages();
   }
@@ -4152,7 +4165,8 @@
     const headers = { "Content-Type": "application/json" };
     if (withLogin) {
       const { data } = await supabase.auth.getSession();
-      if (data?.session) headers.Authorization = `Bearer ${data.session.access_token}`;
+      if (data?.session)
+        headers.Authorization = `Bearer ${data.session.access_token}`;
     }
     let res;
     try {
@@ -4178,7 +4192,7 @@
         : verified
           ? "✓ Verified. You can reset your password by email."
           : "Saved, but not verified yet. Verify it so it can reset your password.";
-    $("emailVerifyRow")?.classList.toggle("hidden", !email || verified);
+    $("emailVerifyRow")?.classList.toggle("hidden", verified);
   }
 
   $("saveAccountEmailBtn")?.addEventListener("click", async () => {
@@ -4189,16 +4203,30 @@
     const ok = await saveSetting({ recovery_email: email || null });
     if (ok) {
       if (changed) appSettings.recovery_email_verified = false;
-      toast(email ? "Recovery email saved. Now verify it." : "Recovery email removed.");
+      toast(
+        email
+          ? "Recovery email saved. Now verify it."
+          : "Recovery email removed.",
+      );
       showRecoveryEmail();
     }
   });
   $("sendEmailCodeBtn")?.addEventListener("click", async () => {
     const btn = $("sendEmailCodeBtn");
     btn.disabled = true;
-    const r = await recoveryApi("send-code", {}, true);
+    const typed = (accountEmailInput?.value || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(typed)) {
+      btn.disabled = false;
+      return toast("Type your recovery email in the box above first.");
+    }
+    const r = await recoveryApi("send-code", { email: typed }, true);
     btn.disabled = false;
     if (!r.ok) return toast(r.error || "Couldn't send the code.");
+    if (appSettings.recovery_email !== typed) {
+      appSettings.recovery_email = typed;
+      appSettings.recovery_email_verified = false;
+      showRecoveryEmail();
+    }
     if (r.already) {
       appSettings.recovery_email_verified = true;
       return showRecoveryEmail();
@@ -4263,10 +4291,15 @@
         } else {
           const r = await recoveryApi(
             "reset",
-            { username, code: q("fpCode").value.trim(), newPassword: q("fpPassword").value },
+            {
+              username,
+              code: q("fpCode").value.trim(),
+              newPassword: q("fpPassword").value,
+            },
             false,
           );
-          if (!r.ok) return showError(r.error || "Couldn't reset the password.");
+          if (!r.ok)
+            return showError(r.error || "Couldn't reset the password.");
           back.remove();
           if ($("username")) $("username").value = username;
           if ($("password")) $("password").value = "";
@@ -4498,6 +4531,326 @@
     applyAppearance,
   );
 
+  // ---- Moments: photo or text updates that disappear after 24 hours ----
+  const MOMENT_BGS = [
+    "#5d58db",
+    "#0ea5a4",
+    "#e11d48",
+    "#16a34a",
+    "#f97316",
+    "#2563eb",
+    "#7c3aed",
+    "#0f172a",
+  ];
+  let momentGroups = [];
+  let momentTimer = null;
+
+  async function loadMoments() {
+    if (!currentUser?.id) return;
+    const { data, error } = await supabase.rpc("get_moments");
+    if (error) return;
+    const byUser = new Map();
+    for (const m of data || []) {
+      if (!byUser.has(m.user_id)) byUser.set(m.user_id, []);
+      byUser.get(m.user_id).push(m);
+    }
+    momentGroups = [...byUser.entries()].map(([userId, list]) => ({
+      userId,
+      list,
+      person: {
+        id: userId,
+        username: list[0].username,
+        display_name: list[0].display_name,
+        avatar_url: list[0].avatar_url,
+      },
+      unseen: list.some((m) => !m.seen),
+      latest: list[list.length - 1].created_at,
+    }));
+    momentGroups.sort((a, b) =>
+      a.userId === currentUser.id
+        ? -1
+        : b.userId === currentUser.id
+          ? 1
+          : b.unseen - a.unseen || (a.latest < b.latest ? 1 : -1),
+    );
+    renderMomentsBar();
+  }
+
+  function renderMomentsBar() {
+    let bar = $("momentsBar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "momentsBar";
+      bar.className = "moments-bar";
+      const anchor =
+        document.querySelector(".chat-list-tabs") ||
+        $("recentChatsBtn")?.parentElement;
+      if (!anchor) return;
+      anchor.before(bar);
+    }
+    bar.innerHTML = "";
+    const mineGroup = momentGroups.find((g) => g.userId === currentUser.id);
+    const me = document.createElement("div");
+    me.className = "moment-tile";
+    me.innerHTML = `<button type="button" class="moment-ring ${mineGroup ? "unseen" : "empty"}" aria-label="${mineGroup ? "View your moments" : "Add a moment"}"><span class="user-avatar">${avatarInner(currentProfile)}</span></button><button type="button" class="moment-add" aria-label="Add a moment">+</button><small>Your moment</small>`;
+    me.querySelector(".moment-ring").addEventListener("click", () =>
+      mineGroup
+        ? openMomentViewer(momentGroups.indexOf(mineGroup))
+        : openMomentComposer(),
+    );
+    me.querySelector(".moment-add").addEventListener(
+      "click",
+      openMomentComposer,
+    );
+    bar.appendChild(me);
+    momentGroups.forEach((g, index) => {
+      if (g.userId === currentUser.id) return;
+      const tile = document.createElement("div");
+      tile.className = "moment-tile";
+      tile.innerHTML = `<button type="button" class="moment-ring ${g.unseen ? "unseen" : "seen"}" aria-label="View moments"><span class="user-avatar">${avatarInner(g.person)}</span></button><small>${escapeHtml(peerName(g.person))}</small>`;
+      tile
+        .querySelector(".moment-ring")
+        .addEventListener("click", () => openMomentViewer(index));
+      bar.appendChild(tile);
+    });
+  }
+
+  // Shrinks big photos before upload so moments load fast.
+  function shrinkImage(file, maxSide = 1280, quality = 0.82) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas
+          .getContext("2d")
+          .drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(
+          (b) =>
+            b ? resolve(b) : reject(new Error("Could not read the photo")),
+          "image/jpeg",
+          quality,
+        );
+      };
+      img.onerror = () => reject(new Error("Could not read the photo"));
+      img.src = url;
+    });
+  }
+
+  function openMomentComposer() {
+    document
+      .querySelectorAll(".moment-composer-back")
+      .forEach((n) => n.remove());
+    const back = document.createElement("div");
+    back.className = "pin-backdrop moment-composer-back";
+    back.innerHTML = `<div class="pin-box moment-composer" role="dialog" aria-modal="true">
+      <h3>New moment</h3>
+      <div class="moment-preview" id="mcPreview" style="background:${MOMENT_BGS[0]}"><span id="mcText">Type something…</span></div>
+      <textarea id="mcInput" maxlength="200" rows="3" placeholder="What's happening?"></textarea>
+      <div class="accent-row" id="mcColors"></div>
+      <label class="ghost-btn" for="mcFile">📷 Add a photo instead</label>
+      <input id="mcFile" type="file" accept="image/*" hidden />
+      <p class="tiny pin-error" id="mcError"></p>
+      <div class="pin-actions">
+        <button type="button" class="ghost-btn" id="mcCancel">Cancel</button>
+        <button type="button" class="primary-btn" id="mcPost">Share</button>
+      </div>
+      <p class="tiny muted">Your chat contacts can see this for 24 hours.</p>
+    </div>`;
+    document.body.appendChild(back);
+    const q = (id) => back.querySelector("#" + id);
+    let bg = MOMENT_BGS[0];
+    let photo = null;
+    q("mcColors").innerHTML = MOMENT_BGS.map(
+      (c, i) =>
+        `<button type="button" class="swatch${i === 0 ? " active" : ""}" data-bg="${c}" style="background:${c}" aria-label="Background ${i + 1}"></button>`,
+    ).join("");
+    q("mcColors")
+      .querySelectorAll(".swatch")
+      .forEach((sw) =>
+        sw.addEventListener("click", () => {
+          bg = sw.dataset.bg;
+          photo = null;
+          q("mcPreview").style.background = bg;
+          q("mcPreview").innerHTML = '<span id="mcText"></span>';
+          q("mcText").textContent = q("mcInput").value || "Type something…";
+          q("mcColors")
+            .querySelectorAll(".swatch")
+            .forEach((x) => x.classList.toggle("active", x === sw));
+        }),
+      );
+    q("mcInput").addEventListener("input", () => {
+      if (!photo)
+        q("mcText").textContent = q("mcInput").value || "Type something…";
+    });
+    q("mcFile").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      e.target.value = "";
+      if (!file) return;
+      if (!file.type.startsWith("image/"))
+        return (q("mcError").textContent = "Choose a photo.");
+      photo = file;
+      q("mcError").textContent = "";
+      q("mcPreview").style.background = "#000";
+      q("mcPreview").innerHTML = "";
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(file);
+      q("mcPreview").appendChild(img);
+      q("mcInput").placeholder = "Add a caption (optional)";
+    });
+    q("mcCancel").onclick = () => back.remove();
+    q("mcPost").onclick = async () => {
+      const text = q("mcInput").value.trim();
+      if (!photo && !text)
+        return (q("mcError").textContent = "Write something or add a photo.");
+      const btn = q("mcPost");
+      btn.disabled = true;
+      q("mcError").textContent = "";
+      try {
+        let row;
+        if (photo) {
+          const blob = await shrinkImage(photo);
+          const path = `${currentUser.id}/${crypto.randomUUID()}.jpg`;
+          const { error: upErr } = await supabase.storage
+            .from("moments")
+            .upload(path, blob, { contentType: "image/jpeg" });
+          if (upErr) throw upErr;
+          row = {
+            user_id: currentUser.id,
+            kind: "image",
+            media_path: path,
+            content: text || null,
+          };
+        } else {
+          row = { user_id: currentUser.id, kind: "text", content: text, bg };
+        }
+        const { error } = await supabase.from("moments").insert(row);
+        if (error) throw error;
+        back.remove();
+        toast("Moment shared for 24 hours.");
+        loadMoments();
+      } catch (err) {
+        q("mcError").textContent =
+          "Couldn't share: " + (err.message || "try again");
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  async function openMomentViewer(groupIndex) {
+    const group = momentGroups[groupIndex];
+    if (!group) return;
+    const isMine = group.userId === currentUser.id;
+    let i = Math.max(
+      0,
+      group.list.findIndex((m) => !m.seen),
+    );
+    const el = document.createElement("div");
+    el.className = "moment-viewer";
+    el.innerHTML = `<div class="mv-bars"></div>
+      <div class="mv-head">
+        <span class="user-avatar">${avatarInner(group.person)}</span>
+        <span class="mv-who"><strong>${escapeHtml(peerName(group.person))}</strong><small id="mvTime"></small></span>
+        <button type="button" class="mv-close" aria-label="Close">✕</button>
+      </div>
+      <div class="mv-stage" id="mvStage"></div>
+      <button type="button" class="mv-prev" aria-label="Previous"></button>
+      <button type="button" class="mv-next" aria-label="Next"></button>
+      <div class="mv-foot" id="mvFoot"></div>`;
+    document.body.appendChild(el);
+    const bars = el.querySelector(".mv-bars");
+    bars.innerHTML = group.list.map(() => "<span><i></i></span>").join("");
+
+    const close = () => {
+      clearTimeout(momentTimer);
+      document.removeEventListener("keydown", onKey);
+      el.remove();
+      renderMomentsBar();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close();
+      if (e.key === "ArrowRight") go(1);
+      if (e.key === "ArrowLeft") go(-1);
+    };
+    function go(step) {
+      i += step;
+      if (i < 0) i = 0;
+      if (i >= group.list.length) return close();
+      show();
+    }
+    async function show() {
+      clearTimeout(momentTimer);
+      const m = group.list[i];
+      bars.querySelectorAll("span").forEach((b, n) => {
+        b.classList.toggle("done", n < i);
+        b.classList.toggle("now", n === i);
+      });
+      el.querySelector("#mvTime").textContent = new Date(
+        m.created_at,
+      ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const stage = el.querySelector("#mvStage");
+      stage.innerHTML = "";
+      stage.style.background =
+        m.kind === "text" ? m.bg || MOMENT_BGS[0] : "#000";
+      if (m.kind === "text") {
+        const t = document.createElement("div");
+        t.className = "mv-text";
+        t.textContent = m.content || "";
+        stage.appendChild(t);
+      } else {
+        const { data } = await supabase.storage
+          .from("moments")
+          .createSignedUrl(m.media_path, 3600);
+        if (group.list[i] !== m) return;
+        const img = document.createElement("img");
+        img.src = data?.signedUrl || "";
+        img.alt = m.content || "Moment";
+        stage.appendChild(img);
+        if (m.content) {
+          const cap = document.createElement("div");
+          cap.className = "mv-caption";
+          cap.textContent = m.content;
+          stage.appendChild(cap);
+        }
+      }
+      const foot = el.querySelector("#mvFoot");
+      foot.innerHTML = "";
+      if (isMine) {
+        foot.innerHTML = `<span>👁 ${m.view_count} view${m.view_count === 1 ? "" : "s"}</span><button type="button" class="ghost-btn" id="mvDelete">Delete</button>`;
+        foot.querySelector("#mvDelete").onclick = async () => {
+          clearTimeout(momentTimer);
+          if (!window.confirm("Delete this moment?")) return show();
+          await supabase.from("moments").delete().eq("id", m.id);
+          if (m.media_path)
+            supabase.storage.from("moments").remove([m.media_path]);
+          close();
+          loadMoments();
+        };
+      } else if (!m.seen) {
+        m.seen = true;
+        supabase
+          .from("moment_views")
+          .insert({ moment_id: m.id, viewer_id: currentUser.id });
+      }
+      // The bar for this slide fills over 5 seconds, then the next one plays.
+      const fill = bars.querySelectorAll("span")[i].firstElementChild;
+      fill.style.animation = "none";
+      void fill.offsetWidth;
+      fill.style.animation = "";
+      momentTimer = setTimeout(() => go(1), 5000);
+    }
+    el.querySelector(".mv-close").onclick = close;
+    el.querySelector(".mv-next").onclick = () => go(1);
+    el.querySelector(".mv-prev").onclick = () => go(-1);
+    document.addEventListener("keydown", onKey);
+    show();
+  }
+
   // ---- Contact names (private to you) and profile links ----
   async function loadContactNames() {
     const { data, error } = await supabase
@@ -4589,6 +4942,13 @@
     setTimeout(() => maybeShowWhatsNew(), 1800);
     loadContactNames();
     openProfileFromLink();
+    supabase.rpc("purge_expired_moments");
+    loadMoments();
+    clearInterval(window.__momentsPoll);
+    window.__momentsPoll = setInterval(
+      () => !document.hidden && loadMoments(),
+      90000,
+    );
   }
   async function saveSetting(changes) {
     appSettings = { ...appSettings, ...changes };
