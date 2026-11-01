@@ -20,7 +20,7 @@ Open config.js.
 
 Replace PASTE_YOUR_SUPABASE_PROJECT_URL_HERE with your Project URL.
 
-Replace PASTE_YOUR_SUPABASE_PUBLISHABLE_KEY_HERE with your publishable key (sb_publishable_..., or the legacy anon key if your dashboard still provides it).
+Replace PASTE*YOUR_SUPABASE_PUBLISHABLE_KEY_HERE with your publishable key (sb_publishable*..., or the legacy anon key if your dashboard still provides it).
 
 Never put a service-role key or database password in browser code.
 
@@ -78,3 +78,15 @@ The message area has overflow and light-theme fixes plus mobile viewport/safe-ar
 Features that still require the backend/native app pass
 
 Chat-score, stages, streaks, in-app AI assistant with voice-note/file understanding, optional recovery email, persistent view-once media/voice-note vault, real call ringtone integration with the device's default ringtone, push notifications, secure public profile/contact links, server-enforced edit expiry, and reliable full media synchronization require database schema, storage policies, Edge Functions/AI provider, push/native capabilities, or additional server-side work. The frontend should not claim these are live until that work is complete.
+Find people (batch F)
+
+New chat > Find people has two opt-in tabs:
+
+- Nearby: shows people around you with an approximate distance. Only a rounded location (about 2 km) is stored, and only people who also turned it on can see you.
+- Contacts: checks phone contacts against people who chose to be findable by phone number. On Android Chrome "Choose contacts" opens the phone book; everywhere else import a .vcf file or type numbers. Matches can be saved with the name from your contacts.
+
+Setup: run chatspace_batch_f.sql once in the Supabase SQL Editor (every row of its result should be true), then upload discover.js, discover.css, app.js, index.html, style.css and service-worker.js.
+
+Phone numbers are not verified (no SMS check), so the screen tells people to confirm it is really the person. Adding SMS verification needs a paid SMS provider.
+
+Message grouping: messages from the same person sent within a minute of each other now sit close together as one block (round on top of the first, flat in the middle, round at the bottom of the last). Only the last message of a block shows the time and ticks. The "+" reaction button now appears with the other actions (long-press or right-click) instead of taking a row under every message

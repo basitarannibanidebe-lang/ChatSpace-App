@@ -4271,17 +4271,62 @@ html[data-theme="light"] .enh-panel {
 }
 
 /* ===== Messages within a minute stay close together ===== */
-.message-row.grouped {
-  margin-top: -11px;
+/* Rows are spaced by .messages { gap: 15px }; pull joined rows up to a 3px gap. */
+.message-row.g-prev {
+  margin-top: -10px;
 }
-.message-row.group-has-next .message-meta {
+/* Only the last message of a block shows the time and tick. */
+.message-row.g-next .message-meta {
   display: none;
 }
-.message-row.mine.group-has-next .bubble {
+.message-row.g-next {
+  gap: 0;
+}
+/* In group chats the sender's name appears once, at the top of the block. */
+.message-row.g-prev .sender-name {
+  display: none;
+}
+/* Corner shapes: outgoing blocks join on the right, incoming on the left. */
+.message-row.mine.g-next .bubble {
+  border-top-right-radius: 17px;
   border-bottom-right-radius: 5px;
 }
-.message-row:not(.mine).group-has-next .bubble {
+.message-row.mine.g-prev .bubble {
+  border-top-right-radius: 5px;
+}
+.message-row.mine.g-prev:not(.g-next) .bubble {
+  border-bottom-right-radius: 17px;
+}
+.message-row:not(.mine).g-next .bubble {
+  border-top-left-radius: 17px;
   border-bottom-left-radius: 5px;
+}
+.message-row:not(.mine).g-prev .bubble {
+  border-top-left-radius: 5px;
+}
+.message-row:not(.mine).g-prev:not(.g-next) .bubble {
+  border-bottom-left-radius: 17px;
+}
+/* First bubble of a block starts round, like a normal message. */
+.message-row.mine.g-next:not(.g-prev) .bubble {
+  border-top-right-radius: 17px;
+}
+.message-row:not(.mine).g-next:not(.g-prev) .bubble {
+  border-top-left-radius: 17px;
+}
+/* Reactions sit under a bubble, so give joined rows that have them room again. */
+.message-row.g-next:has(.reaction-chip) {
+  margin-bottom: 8px;
+}
+
+/* The "+" reaction button no longer takes a row under every message: it appears together
+   with the other actions (long-press on a phone, right-click on a computer), and the
+   reaction row stays collapsed until a message actually has reactions. */
+.message-row:not(.actions-open) .reaction-picker {
+  display: none;
+}
+.message-row:not(.actions-open) .message-reactions:not(:has(.reaction-chip)) {
+  display: none;
 }
 
 /* ===== Moments ===== */

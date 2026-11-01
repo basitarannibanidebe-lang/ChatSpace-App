@@ -1988,22 +1988,44 @@
       }
     }
 
-    // Messages from the same person within a minute of each other stay close together.
-    const sentAt = new Date(msg.created_at).getTime();
-    const prevRow = $("messages").lastElementChild;
-    if (
-      prevRow?.classList.contains("message-row") &&
-      prevRow.dataset.sender === String(msg.sender_id) &&
-      Math.abs(sentAt - Number(prevRow.dataset.ts)) < 60000
-    ) {
-      row.classList.add("grouped");
-      prevRow.classList.add("group-has-next");
-    }
     row.dataset.sender = String(msg.sender_id);
-    row.dataset.ts = String(sentAt);
+    row.dataset.ts = String(new Date(msg.created_at).getTime());
     $("messages").appendChild(row);
     scrollMessages();
   }
+
+  // Messages from the same person sent within a minute of each other stay close together
+  // and join into one block: round at the top of the first, flat in the middle, round at
+  // the bottom of the last. Runs again whenever messages are added, removed or replaced.
+  const GROUP_WINDOW_MS = 60 * 1000;
+  let regroupQueued = false;
+  function regroupMessages() {
+    regroupQueued = false;
+    const rows = [...$("messages").children].filter((el) =>
+      el.classList?.contains("message-row"),
+    );
+    const joined = (a, b) =>
+      a &&
+      b &&
+      a.dataset.sender &&
+      a.dataset.sender === b.dataset.sender &&
+      Math.abs(Number(b.dataset.ts) - Number(a.dataset.ts)) < GROUP_WINDOW_MS &&
+      a.nextElementSibling === b; // nothing (like a day divider) sits between them
+    rows.forEach((row, i) => {
+      const hasPrev = joined(rows[i - 1], row);
+      const hasNext = joined(row, rows[i + 1]);
+      row.classList.toggle("g-prev", Boolean(hasPrev));
+      row.classList.toggle("g-next", Boolean(hasNext));
+    });
+  }
+  const queueRegroup = () => {
+    if (regroupQueued) return;
+    regroupQueued = true;
+    requestAnimationFrame(regroupMessages);
+  };
+  new MutationObserver(queueRegroup).observe($("messages"), {
+    childList: true,
+  });
 
   function openImageViewer(imageUrl) {
     let viewer = document.getElementById("image-viewer");
@@ -3207,7 +3229,7 @@
 
   // New chat panel
   function ncShow(step) {
-    ["ncHome", "ncPersonStep", "ncGroupStep"].forEach((id) =>
+    ["ncHome", "ncPersonStep", "ncDiscoverStep", "ncGroupStep"].forEach((id) =>
       $(id).classList.toggle("hidden", id !== step),
     );
   }
@@ -5446,6 +5468,19 @@
       return currentUser;
     },
     toast,
+    startConversation,
+    ncShow,
+    // Saves a name that only you see for a contact (same as the Contact name box).
+    async saveContactName(contactId, name) {
+      const { error } = await supabase.from("contact_names").upsert({
+        owner_id: currentUser.id,
+        contact_id: contactId,
+        custom_name: name,
+      });
+      if (error) throw new Error("Could not save the name: " + error.message);
+      contactNames.set(contactId, name);
+      loadChats();
+    },
   };
 
   init();

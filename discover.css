@@ -1,0 +1,152 @@
+/* Find people (nearby + contacts). Uses the theme variables from style.css. */
+.dc-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 8px 0 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel2);
+}
+.dc-tab {
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font: 700 14px "DM Sans", sans-serif;
+  cursor: pointer;
+}
+.dc-tab[aria-selected="true"] {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+.dc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel2);
+}
+.dc-card h3 {
+  margin: 0;
+}
+.dc-card p {
+  margin: 0;
+}
+.dc-card label {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dc-points {
+  margin: 2px 0 4px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.dc-points strong {
+  color: var(--text);
+}
+.dc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.dc-row select {
+  flex: 1;
+  min-height: 42px;
+}
+.dc-cc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dc-cc input {
+  width: 90px;
+}
+.dc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dc-actions > button {
+  flex: 1 1 140px;
+  min-height: 44px;
+}
+.dc-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+}
+.dc-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel2);
+}
+.dc-person-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dc-person-text strong,
+.dc-person-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dc-person-text small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.dc-person-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+.dc-person-actions button {
+  min-height: 34px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+.dc-empty {
+  margin: 8px 0;
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+.dc-empty small {
+  font-size: 12px;
+}
+.dc-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.dc-error:empty {
+  display: none;
+}
+.dc-row select {
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel2);
+  color: var(--text);
+  font: 600 14px "DM Sans", sans-serif;
+}
+.dc-person-actions button {
+  white-space: nowrap;
+}
