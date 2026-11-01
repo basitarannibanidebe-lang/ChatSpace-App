@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v8-ai";
+const CACHE_NAME = "chatspace-v9-moments";
 const APP_FILES = [
   "/",
   "/index.html",

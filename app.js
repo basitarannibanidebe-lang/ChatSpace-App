@@ -3987,6 +3987,11 @@
       supabase.removeChannel(viewChannel);
       viewChannel = null;
     }
+    if (momentsChannel) {
+      supabase.removeChannel(momentsChannel);
+      momentsChannel = null;
+    }
+    clearInterval(window.__momentsPoll);
     chatStats = new Map();
     if (realtimeChannel) await supabase.removeChannel(realtimeChannel);
     await supabase.auth.signOut();
@@ -4531,7 +4536,7 @@
     applyAppearance,
   );
 
-  // ---- Moments: photo or text updates that disappear after 24 hours ----
+  // ---- Moments: photo, video (under 50 MB) or text updates that disappear after 24 hours ----
   const MOMENT_BGS = [
     "#5d58db",
     "#0ea5a4",
@@ -4544,6 +4549,33 @@
   ];
   let momentGroups = [];
   let momentTimer = null;
+  let momentsChannel = null,
+    momentsRefreshTimer = null,
+    momentViewWarned = false;
+  const MOMENT_MAX_VIDEO = 50 * 1024 * 1024;
+  const viewsText = (n) => `👁 ${n || 0} view${n === 1 ? "" : "s"}`;
+
+  // Refresh when something changes (a view, a new or deleted moment).
+  function startMomentsRealtime() {
+    if (momentsChannel || !currentUser) return;
+    const refresh = () => {
+      clearTimeout(momentsRefreshTimer);
+      momentsRefreshTimer = setTimeout(loadMoments, 800);
+    };
+    momentsChannel = supabase
+      .channel("moments-" + currentUser.id)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "moments" },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "moment_views" },
+        refresh,
+      )
+      .subscribe();
+  }
 
   async function loadMoments() {
     if (!currentUser?.id) return;
@@ -4652,14 +4684,14 @@
       <div class="moment-preview" id="mcPreview" style="background:${MOMENT_BGS[0]}"><span id="mcText">Type something…</span></div>
       <textarea id="mcInput" maxlength="200" rows="3" placeholder="What's happening?"></textarea>
       <div class="accent-row" id="mcColors"></div>
-      <label class="ghost-btn" for="mcFile">📷 Add a photo instead</label>
-      <input id="mcFile" type="file" accept="image/*" hidden />
+      <label class="ghost-btn" for="mcFile">📷 Add a photo or video</label>
+      <input id="mcFile" type="file" accept="image/*,video/*" hidden />
       <p class="tiny pin-error" id="mcError"></p>
       <div class="pin-actions">
         <button type="button" class="ghost-btn" id="mcCancel">Cancel</button>
         <button type="button" class="primary-btn" id="mcPost">Share</button>
       </div>
-      <p class="tiny muted">Your chat contacts can see this for 24 hours.</p>
+      <p class="tiny muted">Your chat contacts can see this for 24 hours. Videos can be up to 50 MB.</p>
     </div>`;
     document.body.appendChild(back);
     const q = (id) => back.querySelector("#" + id);
@@ -4691,15 +4723,30 @@
       const file = e.target.files[0];
       e.target.value = "";
       if (!file) return;
-      if (!file.type.startsWith("image/"))
-        return (q("mcError").textContent = "Choose a photo.");
+      const isVideo = file.type.startsWith("video/");
+      if (!isVideo && !file.type.startsWith("image/"))
+        return (q("mcError").textContent = "Choose a photo or a video.");
+      if (isVideo && file.size > MOMENT_MAX_VIDEO)
+        return (q("mcError").textContent =
+          "That video is over 50 MB. Choose a shorter one.");
       photo = file;
       q("mcError").textContent = "";
       q("mcPreview").style.background = "#000";
       q("mcPreview").innerHTML = "";
-      const img = document.createElement("img");
-      img.src = URL.createObjectURL(file);
-      q("mcPreview").appendChild(img);
+      const url = URL.createObjectURL(file);
+      if (isVideo) {
+        const vid = document.createElement("video");
+        vid.src = url;
+        vid.muted = true;
+        vid.loop = true;
+        vid.autoplay = true;
+        vid.playsInline = true;
+        q("mcPreview").appendChild(vid);
+      } else {
+        const img = document.createElement("img");
+        img.src = url;
+        q("mcPreview").appendChild(img);
+      }
       q("mcInput").placeholder = "Add a caption (optional)";
     });
     q("mcCancel").onclick = () => back.remove();
@@ -4712,7 +4759,28 @@
       q("mcError").textContent = "";
       try {
         let row;
-        if (photo) {
+        if (photo && photo.type.startsWith("video/")) {
+          if (photo.size > MOMENT_MAX_VIDEO)
+            throw new Error("That video is over 50 MB.");
+          btn.textContent = "Uploading…";
+          const ext =
+            {
+              "video/webm": "webm",
+              "video/quicktime": "mov",
+              "video/3gpp": "3gp",
+            }[photo.type] || "mp4";
+          const path = `${currentUser.id}/${crypto.randomUUID()}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("moments")
+            .upload(path, photo, { contentType: photo.type || "video/mp4" });
+          if (upErr) throw upErr;
+          row = {
+            user_id: currentUser.id,
+            kind: "video",
+            media_path: path,
+            content: text || null,
+          };
+        } else if (photo) {
           const blob = await shrinkImage(photo);
           const path = `${currentUser.id}/${crypto.randomUUID()}.jpg`;
           const { error: upErr } = await supabase.storage
@@ -4738,14 +4806,21 @@
           "Couldn't share: " + (err.message || "try again");
       } finally {
         btn.disabled = false;
+        btn.textContent = "Share";
       }
     };
   }
 
   async function openMomentViewer(groupIndex) {
-    const group = momentGroups[groupIndex];
+    let group = momentGroups[groupIndex];
     if (!group) return;
     const isMine = group.userId === currentUser.id;
+    if (isMine) {
+      // Always start from fresh numbers, not what was loaded a while ago.
+      await loadMoments();
+      group = momentGroups.find((g) => g.userId === currentUser.id) || group;
+    }
+    let countTimer = null;
     let i = Math.max(
       0,
       group.list.findIndex((m) => !m.seen),
@@ -4766,12 +4841,34 @@
     const bars = el.querySelector(".mv-bars");
     bars.innerHTML = group.list.map(() => "<span><i></i></span>").join("");
 
+    const stopVideo = () =>
+      el.querySelectorAll("video").forEach((v) => {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+      });
     const close = () => {
       clearTimeout(momentTimer);
+      clearInterval(countTimer);
       document.removeEventListener("keydown", onKey);
+      stopVideo();
       el.remove();
       renderMomentsBar();
     };
+    // While you watch your own moment, the view count keeps itself up to date.
+    async function refreshCounts() {
+      const { data, error } = await supabase.rpc("get_moments");
+      if (error || !data) return;
+      const byId = new Map(data.map((r) => [r.id, r]));
+      for (const m of group.list) {
+        const fresh = byId.get(m.id);
+        if (fresh) m.view_count = fresh.view_count;
+      }
+      const label = el.querySelector("#mvViews");
+      if (label && group.list[i])
+        label.textContent = viewsText(group.list[i].view_count);
+    }
+    if (isMine) countTimer = setInterval(refreshCounts, 4000);
     const onKey = (e) => {
       if (e.key === "Escape") close();
       if (e.key === "ArrowRight") go(1);
@@ -4794,14 +4891,56 @@
         m.created_at,
       ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       const stage = el.querySelector("#mvStage");
+      stopVideo();
+      el.querySelectorAll(".mv-sound").forEach((n) => n.remove());
       stage.innerHTML = "";
       stage.style.background =
         m.kind === "text" ? m.bg || MOMENT_BGS[0] : "#000";
+      let vid = null;
       if (m.kind === "text") {
         const t = document.createElement("div");
         t.className = "mv-text";
         t.textContent = m.content || "";
         stage.appendChild(t);
+      } else if (m.kind === "video") {
+        const { data } = await supabase.storage
+          .from("moments")
+          .createSignedUrl(m.media_path, 3600);
+        if (group.list[i] !== m) return;
+        vid = document.createElement("video");
+        vid.className = "mv-video";
+        vid.src = data?.signedUrl || "";
+        vid.playsInline = true;
+        vid.preload = "auto";
+        stage.appendChild(vid);
+        vid.addEventListener("ended", () => go(1));
+        vid.addEventListener("error", () => {
+          toast("Couldn't play this video.");
+          clearTimeout(momentTimer);
+          momentTimer = setTimeout(() => go(1), 2500);
+        });
+        const snd = document.createElement("button");
+        snd.type = "button";
+        snd.className = "mv-sound";
+        snd.textContent = "🔊";
+        snd.setAttribute("aria-label", "Sound on or off");
+        snd.onclick = () => {
+          vid.muted = !vid.muted;
+          snd.textContent = vid.muted ? "🔇" : "🔊";
+        };
+        el.appendChild(snd);
+        // Sound first; if the browser blocks that, play muted instead.
+        vid.play().catch(() => {
+          vid.muted = true;
+          snd.textContent = "🔇";
+          vid.play().catch(() => {});
+        });
+        if (m.content) {
+          const cap = document.createElement("div");
+          cap.className = "mv-caption";
+          cap.textContent = m.content;
+          stage.appendChild(cap);
+        }
       } else {
         const { data } = await supabase.storage
           .from("moments")
@@ -4821,7 +4960,8 @@
       const foot = el.querySelector("#mvFoot");
       foot.innerHTML = "";
       if (isMine) {
-        foot.innerHTML = `<span>👁 ${m.view_count} view${m.view_count === 1 ? "" : "s"}</span><button type="button" class="ghost-btn" id="mvDelete">Delete</button>`;
+        foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><button type="button" class="ghost-btn" id="mvDelete">Delete</button>`;
+        refreshCounts();
         foot.querySelector("#mvDelete").onclick = async () => {
           clearTimeout(momentTimer);
           if (!window.confirm("Delete this moment?")) return show();
@@ -4835,14 +4975,38 @@
         m.seen = true;
         supabase
           .from("moment_views")
-          .insert({ moment_id: m.id, viewer_id: currentUser.id });
+          .insert({ moment_id: m.id, viewer_id: currentUser.id })
+          .then(({ error }) => {
+            // 23505 = already counted, which is fine.
+            if (error && error.code !== "23505") {
+              m.seen = false;
+              console.error("Moment view not saved:", error);
+              if (!momentViewWarned) {
+                momentViewWarned = true;
+                toast(
+                  "Your view couldn't be saved: " +
+                    (error.message || "try again"),
+                );
+              }
+            }
+          });
       }
-      // The bar for this slide fills over 5 seconds, then the next one plays.
+      // Photos and text: the bar fills over 5 seconds, then the next one plays.
+      // Videos: the bar follows the video and moves on when it ends.
       const fill = bars.querySelectorAll("span")[i].firstElementChild;
       fill.style.animation = "none";
+      fill.style.width = "";
       void fill.offsetWidth;
-      fill.style.animation = "";
-      momentTimer = setTimeout(() => go(1), 5000);
+      if (vid) {
+        fill.style.width = "0";
+        vid.addEventListener("timeupdate", () => {
+          if (vid.duration)
+            fill.style.width = (vid.currentTime / vid.duration) * 100 + "%";
+        });
+      } else {
+        fill.style.animation = "";
+        momentTimer = setTimeout(() => go(1), 5000);
+      }
     }
     el.querySelector(".mv-close").onclick = close;
     el.querySelector(".mv-next").onclick = () => go(1);
@@ -4944,11 +5108,18 @@
     openProfileFromLink();
     supabase.rpc("purge_expired_moments");
     loadMoments();
+    startMomentsRealtime();
     clearInterval(window.__momentsPoll);
     window.__momentsPoll = setInterval(
       () => !document.hidden && loadMoments(),
-      90000,
+      45000,
     );
+    if (!window.__momentsVis) {
+      window.__momentsVis = true;
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && currentUser) loadMoments();
+      });
+    }
   }
   async function saveSetting(changes) {
     appSettings = { ...appSettings, ...changes };
