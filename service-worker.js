@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v17-mobile";
+const CACHE_NAME = "chatspace-v18-install";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -23,7 +23,11 @@ const CDN_HOSTS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_FILES)),
+    caches
+      .open(CACHE_NAME)
+      .then((cache) =>
+        cache.addAll(APP_FILES.map((u) => new Request(u, { cache: "reload" }))),
+      ),
   );
 
   self.skipWaiting();
@@ -70,7 +74,7 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(async () => {
-        const cached = await caches.match(request);
+        const cached = await caches.match(request, { ignoreSearch: true });
         return (
           cached ||
           (request.mode === "navigate"

@@ -4837,6 +4837,7 @@ html[data-theme="light"] .enh-panel {
   border-bottom-left-radius: 5px;
 }
 
+
 /* ===== Moments: likes, replies, forwarding ===== */
 .stats-tiles.four {
   grid-template-columns: repeat(4, 1fr);
@@ -5153,9 +5154,7 @@ button.mf-row:hover {
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  transition:
-    transform 0.12s ease,
-    background 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
 .mv-btn:active {
   transform: scale(0.92);
@@ -5234,9 +5233,7 @@ button.mf-row:hover {
   border-radius: 14px;
   background: var(--panel2);
   color: var(--text);
-  font:
-    16px "DM Sans",
-    sans-serif;
+  font: 16px "DM Sans", sans-serif;
   resize: none;
 }
 .mv-modal textarea:focus,
