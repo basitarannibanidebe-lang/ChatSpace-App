@@ -18,12 +18,11 @@
     />
     <link rel="stylesheet" href="./style.css" />
     <link rel="stylesheet" href="./ai.css" />
-    <link rel="stylesheet" href="./discover.css" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./config.js"></script>
     <script src="./enhance.js" defer></script>
     <script src="./ai.js" defer></script>
-    <script src="./discover.js" defer></script>
+    <script src="./groupcall.js" defer></script>
     <script src="./app.js" defer></script>
     <style>
       #netlify-badge,
@@ -653,12 +652,6 @@
                 >Find a person by username and start chatting</small
               >
             </button>
-            <button id="ncFindPeople" class="nc-card" type="button">
-              <strong>Find people</strong
-              ><small class="muted"
-                >See who is nearby or already in your contacts</small
-              >
-            </button>
             <button id="ncCreateGroup" class="nc-card" type="button">
               <strong>Create group</strong
               ><small class="muted">Chat with several people at once</small>
@@ -675,10 +668,6 @@
               />
             </div>
             <div id="searchResults" class="search-results"></div>
-          </div>
-          <div id="ncDiscoverStep" class="hidden">
-            <button class="ghost-btn nc-back" type="button">← Back</button>
-            <div id="discoverRoot"></div>
           </div>
           <div id="ncGroupStep" class="hidden">
             <button class="ghost-btn nc-back" type="button">← Back</button>

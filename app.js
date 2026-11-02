@@ -1243,6 +1243,7 @@
     setAvatar($("peerAvatar"), peer);
     refreshPeerStatus();
     renderStatsChip();
+    window.CSGroupCall?.refreshBanner();
     $("welcomePanel").classList.add("hidden");
     $("messages").classList.remove("hidden");
     $("composer").classList.remove("hidden");
@@ -1489,6 +1490,12 @@
 
       container.appendChild(button);
     }
+
+    // Lets the stylesheet keep tight message clusters compact when nobody reacted.
+    container.classList.toggle(
+      "has-chips",
+      Boolean(container.querySelector(".reaction-chip")),
+    );
 
     // Reaction picker.
     const picker = document.createElement("div");
@@ -1988,44 +1995,22 @@
       }
     }
 
+    // Messages from the same person within a minute of each other stay close together.
+    const sentAt = new Date(msg.created_at).getTime();
+    const prevRow = $("messages").lastElementChild;
+    if (
+      prevRow?.classList.contains("message-row") &&
+      prevRow.dataset.sender === String(msg.sender_id) &&
+      Math.abs(sentAt - Number(prevRow.dataset.ts)) < 60000
+    ) {
+      row.classList.add("grouped");
+      prevRow.classList.add("group-has-next");
+    }
     row.dataset.sender = String(msg.sender_id);
-    row.dataset.ts = String(new Date(msg.created_at).getTime());
+    row.dataset.ts = String(sentAt);
     $("messages").appendChild(row);
     scrollMessages();
   }
-
-  // Messages from the same person sent within a minute of each other stay close together
-  // and join into one block: round at the top of the first, flat in the middle, round at
-  // the bottom of the last. Runs again whenever messages are added, removed or replaced.
-  const GROUP_WINDOW_MS = 60 * 1000;
-  let regroupQueued = false;
-  function regroupMessages() {
-    regroupQueued = false;
-    const rows = [...$("messages").children].filter((el) =>
-      el.classList?.contains("message-row"),
-    );
-    const joined = (a, b) =>
-      a &&
-      b &&
-      a.dataset.sender &&
-      a.dataset.sender === b.dataset.sender &&
-      Math.abs(Number(b.dataset.ts) - Number(a.dataset.ts)) < GROUP_WINDOW_MS &&
-      a.nextElementSibling === b; // nothing (like a day divider) sits between them
-    rows.forEach((row, i) => {
-      const hasPrev = joined(rows[i - 1], row);
-      const hasNext = joined(row, rows[i + 1]);
-      row.classList.toggle("g-prev", Boolean(hasPrev));
-      row.classList.toggle("g-next", Boolean(hasNext));
-    });
-  }
-  const queueRegroup = () => {
-    if (regroupQueued) return;
-    regroupQueued = true;
-    requestAnimationFrame(regroupMessages);
-  };
-  new MutationObserver(queueRegroup).observe($("messages"), {
-    childList: true,
-  });
 
   function openImageViewer(imageUrl) {
     let viewer = document.getElementById("image-viewer");
@@ -2617,6 +2602,7 @@
       <div class="call-controls">
         <button type="button" id="callMute" class="call-btn" aria-label="Mute microphone">🎤</button>
         <button type="button" id="callCam" class="call-btn ${call.media === "video" ? "" : "hidden"}" aria-label="Turn camera off">📷</button>
+        <button type="button" id="callAdd" class="call-btn" aria-label="Add someone to this call" title="Add someone">＋</button>
         <button type="button" id="callEnd" class="call-btn end" aria-label="End call">✕</button>
       </div>`;
     document.body.appendChild(el);
@@ -2627,6 +2613,9 @@
     $("callStatus").textContent = status;
     if (call.media === "video") $("localVideo").srcObject = call.local;
     $("callEnd").addEventListener("click", () => endCall("hangup"));
+    $("callAdd").addEventListener("click", () =>
+      window.CSGroupCall?.upgradeFromOneToOne(),
+    );
     $("callMute").addEventListener("click", () => {
       const track = call.local.getAudioTracks()[0];
       if (!track) return;
@@ -2872,6 +2861,8 @@
     if (!call) return;
     const c = call;
     call = null;
+    if (c.state === "connected")
+      lastOneToOneEnd = { peerId: c.peerId, at: Date.now() };
     clearTimeout(c.ringTimeout);
     clearTimeout(c.discTimer);
     clearTimeout(c.connectTimer);
@@ -2932,8 +2923,52 @@
       .eq("from_user", currentUser?.id || "");
   }
 
+  // ---- Hand-over to the group call module (groupcall.js) ----
+  let lastOneToOneEnd = null;
+  // Moves my microphone/camera out of a one-to-one call so a group call can keep using them.
+  function takeOneToOneStream(notify = true) {
+    if (!call) return null;
+    const stream = call.local;
+    call.local = null;
+    endCall("upgrade", notify);
+    return stream;
+  }
+  const groupCallApi = {
+    get supabase() {
+      return supabase;
+    },
+    user: () => currentUser,
+    getActive: () => ({ conversationId: activeConversation, peer: activePeer }),
+    getPeers: () => lastPeers,
+    isBlocked: (id) => blockedIds.has(id),
+    toast,
+    escapeHtml,
+    setAvatar,
+    peerName,
+    getIceServers,
+    getMedia,
+    mediaError,
+    fmtDuration,
+    startRing,
+    stopRing,
+    getOneToOne: () => call,
+    takeOneToOneStream,
+    lastOneToOneEnd: () => lastOneToOneEnd,
+    insertCallNote: async (conversationId, content) => {
+      await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_id: currentUser.id,
+        content,
+      });
+      if (activeConversation === conversationId) await loadMessages();
+      loadChats();
+    },
+  };
+
   function startCallListener() {
     if (callChannel || !currentUser?.id) return;
+    window.CSGroupCall?.init(groupCallApi);
+    window.CSGroupCall?.start();
     callChannel = supabase
       .channel("calls-" + currentUser.id)
       .on(
@@ -2952,9 +2987,18 @@
   function stopCallListener() {
     if (callChannel) supabase.removeChannel(callChannel);
     callChannel = null;
+    window.CSGroupCall?.stop();
   }
-  $("voiceCallBtn").addEventListener("click", () => startCall("voice"));
-  $("videoCallBtn").addEventListener("click", () => startCall("video"));
+  $("voiceCallBtn").addEventListener("click", () =>
+    activePeer?.isGroup
+      ? window.CSGroupCall?.startFromGroupChat("voice")
+      : startCall("voice"),
+  );
+  $("videoCallBtn").addEventListener("click", () =>
+    activePeer?.isGroup
+      ? window.CSGroupCall?.startFromGroupChat("video")
+      : startCall("video"),
+  );
 
   // ---- Chat lock (PIN) ----
   let lockUnlocked = false,
@@ -3229,7 +3273,7 @@
 
   // New chat panel
   function ncShow(step) {
-    ["ncHome", "ncPersonStep", "ncDiscoverStep", "ncGroupStep"].forEach((id) =>
+    ["ncHome", "ncPersonStep", "ncGroupStep"].forEach((id) =>
       $(id).classList.toggle("hidden", id !== step),
     );
   }
@@ -4466,10 +4510,7 @@
     if (typingChannel) supabase.removeChannel(typingChannel);
     applyBlockState();
     applyWallpaper(activePeer?.preferences?.wallpaper);
-    $("callActions").classList.toggle(
-      "hidden",
-      !activePeer || activePeer.isGroup,
-    );
+    $("callActions").classList.toggle("hidden", !activePeer);
     peerLastSeen = null;
     if (activePeer && !activePeer.isGroup)
       loadPeerPresence(activePeer.id).then(refreshPeerStatus);
@@ -5468,19 +5509,6 @@
       return currentUser;
     },
     toast,
-    startConversation,
-    ncShow,
-    // Saves a name that only you see for a contact (same as the Contact name box).
-    async saveContactName(contactId, name) {
-      const { error } = await supabase.from("contact_names").upsert({
-        owner_id: currentUser.id,
-        contact_id: contactId,
-        custom_name: name,
-      });
-      if (error) throw new Error("Could not save the name: " + error.message);
-      contactNames.set(contactId, name);
-      loadChats();
-    },
   };
 
   init();

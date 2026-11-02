@@ -1,14 +1,13 @@
-const CACHE_NAME = "chatspace-v10-discover";
+const CACHE_NAME = "chatspace-v10-groupcalls";
 const APP_FILES = [
   "/",
   "/index.html",
   "/style.css",
   "/app.js",
+  "/groupcall.js",
   "/enhance.js",
   "/ai.js",
   "/ai.css",
-  "/discover.js",
-  "/discover.css",
   "/manifest.json",
   "/config.js",
 ];
