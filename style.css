@@ -5062,3 +5062,281 @@ button.mf-row:hover {
 .moment-reshare-note {
   margin: 0;
 }
+
+/* =========================================================
+   POLISH PASS: moments viewer, modals, chat cards, profile
+========================================================= */
+.moment-viewer {
+  --foot: calc(84px + env(safe-area-inset-bottom, 0px));
+}
+.moment-viewer.has-reply {
+  --foot: calc(158px + env(safe-area-inset-bottom, 0px));
+}
+.moment-viewer::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(150px + env(safe-area-inset-top, 0px));
+  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+  z-index: 2;
+  pointer-events: none;
+}
+.mv-prev,
+.mv-next {
+  top: calc(96px + env(safe-area-inset-top, 0px));
+  bottom: var(--foot);
+}
+.mv-caption {
+  bottom: calc(var(--foot) + 4px);
+  background: none;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+  font-size: 16px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.moment-viewer.has-recap .mv-caption {
+  bottom: calc(var(--foot) + 66px);
+}
+.mv-recap {
+  bottom: calc(var(--foot) + 4px);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+.mv-reshare {
+  top: calc(92px + env(safe-area-inset-top, 0px));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-weight: 600;
+}
+.mv-foot {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  padding-top: 28px;
+}
+.mv-foot.has-reply {
+  padding: 28px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  gap: 10px;
+}
+.mv-reply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mv-reply input {
+  height: 46px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(20, 20, 28, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mv-reply input:focus {
+  outline: none;
+  border-color: var(--accent2);
+}
+.mv-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 6px;
+}
+.mv-btn {
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+.mv-btn:active {
+  transform: scale(0.92);
+}
+.mv-btn.mv-send {
+  background: var(--accent);
+}
+.mv-btn.recording {
+  background: #e11d48;
+}
+.mv-btn.mv-like {
+  font-size: 24px;
+}
+.mv-btn:focus-visible,
+.dc-tab:focus-visible,
+.moment-ref:focus-visible,
+.mf-row:focus-visible {
+  outline: 2px solid var(--accent2);
+  outline-offset: 2px;
+}
+.mv-owner-tools .ghost-btn {
+  min-height: 36px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+}
+.mv-gifs {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.mv-heartburst {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  z-index: 5;
+  font-size: 110px;
+  line-height: 1;
+  color: #ff4d6d;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: mvHeart 0.75s ease-out forwards;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.5));
+}
+@keyframes mvHeart {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -40%) scale(0.4);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -90%) scale(1);
+  }
+}
+
+/* Moment modals: bottom sheets on phones */
+.mv-modal {
+  text-align: left;
+}
+.mv-modal h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.mv-modal textarea,
+.mv-modal input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel2);
+  color: var(--text);
+  font:
+    16px "DM Sans",
+    sans-serif;
+  resize: none;
+}
+.mv-modal textarea:focus,
+.mv-modal input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.mv-modal .pin-actions {
+  display: flex;
+  gap: 10px;
+}
+.mv-modal .pin-actions button {
+  flex: 1;
+  min-height: 46px;
+}
+.mf-row {
+  min-height: 52px;
+  transition: background 0.12s ease;
+}
+.mf-row .user-avatar {
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+@media (max-width: 600px) {
+  .mv-modal-back {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .mv-modal {
+    width: 100%;
+    max-width: none;
+    border-radius: 24px 24px 0 0;
+    padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    animation: sheetUp 0.22s ease both;
+  }
+  .mv-modal::before {
+    content: "";
+    align-self: center;
+    width: 38px;
+    height: 4px;
+    border-radius: 4px;
+    background: var(--line);
+    margin-bottom: 4px;
+  }
+}
+@keyframes sheetUp {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+
+/* Moment card inside chat bubbles */
+.moment-ref {
+  max-width: 280px;
+  border-left: 3px solid var(--accent);
+  transition: background 0.12s ease;
+}
+.moment-ref:hover {
+  background: rgba(127, 127, 127, 0.22);
+}
+.mr-thumb {
+  width: 52px;
+  height: 52px;
+}
+.mr-meta strong {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Profile likes */
+#peerProfileLikes:not(:empty) {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+  font-weight: 700;
+}
+@media (max-width: 380px) {
+  .stats-tiles.four {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .mv-btn {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mv-heartburst,
+  .mv-modal,
+  .mv-btn {
+    animation: none;
+    transition: none;
+  }
+}

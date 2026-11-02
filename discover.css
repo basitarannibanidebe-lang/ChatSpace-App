@@ -194,3 +194,122 @@
   padding: 4px 10px;
   font-size: 13px;
 }
+
+/* =========================================================
+   POLISH PASS: map
+========================================================= */
+.dc-map {
+  height: clamp(300px, 52vh, 440px);
+  background: #0f1420;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+/* Dark map to match the app (tiles are inverted, popups and pins are not) */
+.dc-map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9)
+    saturate(0.55);
+}
+.dc-map .leaflet-control-attribution {
+  background: rgba(9, 12, 20, 0.72);
+  color: var(--muted);
+  font-size: 10px;
+}
+.dc-map .leaflet-control-attribution a {
+  color: var(--accent2);
+}
+.dc-map .leaflet-bar {
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.dc-map .leaflet-bar a {
+  background: var(--panel);
+  color: var(--text);
+  border-bottom-color: var(--line);
+}
+.dc-map .leaflet-bar a:hover {
+  background: var(--panel2);
+}
+.dc-map .leaflet-popup-content-wrapper {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.dc-map .leaflet-popup-tip {
+  background: var(--panel);
+}
+.dc-map .leaflet-popup-content {
+  margin: 12px 14px;
+}
+.dc-popup {
+  color: var(--text);
+  min-width: 150px;
+}
+.dc-popup-row small {
+  color: var(--muted);
+}
+.dc-popup-row + .dc-popup-row {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.dc-pin {
+  background: none;
+  border: 0;
+}
+.dc-pin-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font:
+    800 14px/1 "DM Sans",
+    sans-serif;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  transition: transform 0.12s ease;
+}
+.dc-pin:hover .dc-pin-inner {
+  transform: scale(1.1);
+}
+.dc-pin.me .dc-pin-inner {
+  background: #16a34a;
+  font-size: 11px;
+}
+.dc-map-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dc-map-tools .ghost-btn {
+  flex: 1;
+  min-height: 42px;
+  font-size: 13px;
+}
+.dc-map-tools .ghost-btn:disabled {
+  opacity: 0.45;
+}
+.dc-maplist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.dc-maplist .dc-person {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.dc-maplist .dc-person:hover {
+  background: var(--panel);
+}
+.dc-tabs.three .dc-tab {
+  font-size: 13px;
+}
+@media (max-width: 380px) {
+  .dc-tabs.three .dc-tab {
+    font-size: 12px;
+  }
+}

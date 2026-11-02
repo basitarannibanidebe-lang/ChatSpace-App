@@ -63,6 +63,8 @@
     myPhoneSaved: false,
     map: null,
     mapVisible: false,
+    mapMe: null,
+    mapPoints: [],
   };
 
   /* ---------- phone numbers ---------- */
@@ -422,7 +424,12 @@
         <button type="button" class="ghost-btn" id="dcRefresh">Refresh</button>
       </div>
       <div id="dcMap" class="dc-map"></div>
+      <div class="dc-map-tools">
+        <button type="button" class="ghost-btn" id="dcMapMe">📍 Center on me</button>
+        <button type="button" class="ghost-btn" id="dcMapAll">Show everyone</button>
+      </div>
       <p id="dcMapNote" class="muted tiny" role="status">Looking…</p>
+      <div id="dcMapList" class="dc-maplist"></div>
       <button type="button" class="ghost-btn danger full" id="dcMapOff">Hide me from the map</button>
       <p id="dcMsg" class="dc-error" role="status"></p>`;
     $("dcRadius").addEventListener("change", (e) => {
@@ -430,6 +437,13 @@
       runMap(false);
     });
     $("dcRefresh").addEventListener("click", () => runMap(true));
+    $("dcMapMe").addEventListener("click", () => {
+      if (state.map && state.mapMe)
+        state.map.flyTo(state.mapMe, 12, { duration: 0.6 });
+    });
+    $("dcMapAll").addEventListener("click", () =>
+      fitAll(state.map, state.mapPoints),
+    );
     $("dcMapOff").addEventListener("click", async (e) => {
       setBusy(e.currentTarget, true);
       try {
@@ -468,6 +482,26 @@
     }
   }
 
+  function fitAll(map, points) {
+    if (!map || !points?.length) return;
+    if (points.length === 1) map.flyTo(points[0], 12, { duration: 0.6 });
+    else
+      map.flyToBounds(window.L.latLngBounds(points).pad(0.35), {
+        maxZoom: 13,
+        duration: 0.6,
+      });
+  }
+  function openPerson(p) {
+    app().startConversation({
+      id: p.user_id,
+      username: p.username,
+      display_name: p.display_name,
+      avatar_url: p.avatar_url,
+    });
+  }
+  const distText = (km) =>
+    km < 3 ? "Less than 3 km away" : `About ${km} km away`;
+
   function drawMap(rows) {
     if (state.map) {
       state.map.remove();
@@ -486,7 +520,7 @@
       maxZoom: 15,
       attribution: "© OpenStreetMap contributors",
     }).addTo(map);
-    // One circle per ~2 km area; everyone in that area is listed in its popup.
+    // One marker per ~2 km area; everyone in that area is listed in its popup.
     const areas = new Map();
     for (const r of rows) {
       const key = r.lat.toFixed(3) + "," + r.lng.toFixed(3);
@@ -495,14 +529,39 @@
       areas.get(key).people.push(r);
     }
     const points = [];
+    const markerFor = new Map();
+    state.mapMe = null;
     for (const a of areas.values()) {
-      points.push([a.lat, a.lng]);
       const mine = a.people.some((p) => p.is_me);
-      const circle = L.circle([a.lat, a.lng], {
+      const others = a.people.filter((p) => !p.is_me);
+      points.push([a.lat, a.lng]);
+      if (mine) state.mapMe = [a.lat, a.lng];
+      L.circle([a.lat, a.lng], {
         radius: 1000,
-        color: mine ? "#16a34a" : "#5d58db",
-        weight: 2,
-        fillOpacity: 0.25,
+        color: mine && !others.length ? "#53e0b0" : "#7775ff",
+        weight: 1.5,
+        opacity: 0.8,
+        fillOpacity: 0.14,
+        interactive: false,
+      }).addTo(map);
+      const pin = document.createElement("span");
+      pin.className = "dc-pin-inner";
+      pin.textContent =
+        others.length > 1
+          ? String(others.length)
+          : others.length === 1
+            ? (others[0].display_name ||
+                others[0].username ||
+                "?")[0].toUpperCase()
+            : "You";
+      const marker = L.marker([a.lat, a.lng], {
+        icon: L.divIcon({
+          className: "dc-pin" + (mine && !others.length ? " me" : ""),
+          html: pin,
+          iconSize: [38, 38],
+          iconAnchor: [19, 19],
+        }),
+        title: others.length ? `${others.length} nearby` : "You",
       }).addTo(map);
       const box = document.createElement("div");
       box.className = "dc-popup";
@@ -516,28 +575,20 @@
         line.appendChild(name);
         if (!p.is_me) {
           const sub = document.createElement("small");
-          sub.textContent =
-            p.distance_km < 3
-              ? "Less than 3 km away"
-              : `About ${p.distance_km} km away`;
+          sub.textContent = distText(p.distance_km);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "primary-btn dc-msg";
           btn.textContent = "Message";
-          btn.addEventListener("click", () =>
-            app().startConversation({
-              id: p.user_id,
-              username: p.username,
-              display_name: p.display_name,
-              avatar_url: p.avatar_url,
-            }),
-          );
+          btn.addEventListener("click", () => openPerson(p));
           line.append(sub, btn);
         }
         box.appendChild(line);
       }
-      circle.bindPopup(box);
+      marker.bindPopup(box, { closeButton: false });
+      for (const p of others) markerFor.set(p.user_id, marker);
     }
+    state.mapPoints = points;
     map.invalidateSize();
     if (points.length === 1) map.setView(points[0], 12);
     else if (points.length > 1)
@@ -545,12 +596,42 @@
     setTimeout(() => {
       if (state.map === map) map.invalidateSize();
     }, 80);
-    const others = rows.filter((r) => !r.is_me).length;
+    const mapMeBtn = $("dcMapMe");
+    if (mapMeBtn) mapMeBtn.disabled = !state.mapMe;
+    const allBtn = $("dcMapAll");
+    if (allBtn) allBtn.disabled = points.length < 2;
+
+    const others = rows.filter((r) => !r.is_me);
     const note = $("dcMapNote");
     note.className = "muted tiny";
-    note.textContent = others
-      ? `${others} ${others === 1 ? "person" : "people"} on the map. Circles are about 2 km wide. Tap one to see who's there.`
+    note.textContent = others.length
+      ? `${others.length} ${others.length === 1 ? "person" : "people"} on the map. Markers show an area about 2 km wide.`
       : "No one else is on the map yet. Only people who chose to appear here are shown.";
+
+    const list = $("dcMapList");
+    if (list) {
+      list.innerHTML = "";
+      for (const p of others) {
+        const row = document.createElement("div");
+        row.className = "dc-person";
+        row.innerHTML = `
+          <span class="user-avatar">${esc((p.display_name || p.username || "?")[0].toUpperCase())}</span>
+          <span class="dc-person-text"><strong>${esc(p.display_name || p.username)}</strong><small>@${esc(p.username)} · ${esc(distText(p.distance_km))}</small></span>
+          <span class="dc-person-actions"><button type="button" class="primary-btn dc-msg">Message</button></span>`;
+        row
+          .querySelector("button")
+          .addEventListener("click", () => openPerson(p));
+        row.addEventListener("click", (e) => {
+          if (e.target.closest("button")) return;
+          const mk = markerFor.get(p.user_id);
+          if (!mk || state.map !== map) return;
+          $("dcMap").scrollIntoView({ behavior: "smooth", block: "nearest" });
+          map.flyTo(mk.getLatLng(), 12, { duration: 0.6 });
+          mk.openPopup();
+        });
+        list.appendChild(row);
+      }
+    }
   }
 
   /* ----- contacts ----- */

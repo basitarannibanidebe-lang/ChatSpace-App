@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v15-map-fix";
+const CACHE_NAME = "chatspace-v16-polish";
 const APP_FILES = [
   "/",
   "/index.html",

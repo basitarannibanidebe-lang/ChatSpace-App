@@ -4986,6 +4986,7 @@
       el.querySelectorAll(".mv-reshare, .mv-recap").forEach((n) => n.remove());
       const cur = group.list[i];
       const r = cur && resh.get(cur.id);
+      el.classList.toggle("has-recap", Boolean(r && r.caption));
       if (!r) return;
       const from = r.original_display_name || r.original_username || "someone";
       const tag = document.createElement("div");
@@ -5058,6 +5059,7 @@
     function buildReplyFoot(m) {
       const foot = el.querySelector("#mvFoot");
       foot.className = "mv-foot has-reply";
+      el.classList.add("has-reply");
       const who = escapeHtml(
         group.person.display_name || group.person.username,
       );
@@ -5068,12 +5070,14 @@
         </div>
         <div class="mv-reply">
           <input id="mvReplyInput" maxlength="500" placeholder="Reply to ${who}…" autocomplete="off" />
-          <button type="button" class="mv-btn" id="mvGifBtn" aria-label="Send a GIF">GIF</button>
-          <button type="button" class="mv-btn" id="mvMicBtn" aria-label="Record a voice note">🎙</button>
-          <button type="button" class="mv-btn" id="mvSendBtn" aria-label="Send reply">➤</button>
-          <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment">♡</button>
-          <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment">↗</button>
-          <button type="button" class="mv-btn" id="mvRepost" aria-label="Reshare to your moments">↻</button>
+          <button type="button" class="mv-btn mv-send" id="mvSendBtn" aria-label="Send reply">➤</button>
+        </div>
+        <div class="mv-actions">
+          <button type="button" class="mv-btn" id="mvGifBtn" aria-label="Send a GIF" title="GIF">GIF</button>
+          <button type="button" class="mv-btn" id="mvMicBtn" aria-label="Record a voice note" title="Voice note">🎙</button>
+          <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment" title="Like">♡</button>
+          <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment" title="Forward">↗</button>
+          <button type="button" class="mv-btn" id="mvRepost" aria-label="Reshare to your moments" title="Reshare">↻</button>
         </div>`;
       const input = foot.querySelector("#mvReplyInput");
       const gifBox = foot.querySelector("#mvGifs");
@@ -5226,6 +5230,13 @@
         paintEngagement();
         ev.currentTarget.classList.add("pop");
         setTimeout(() => ev.currentTarget?.classList.remove("pop"), 300);
+        if (!was) {
+          const burst = document.createElement("div");
+          burst.className = "mv-heartburst";
+          burst.textContent = "♥";
+          el.appendChild(burst);
+          setTimeout(() => burst.remove(), 800);
+        }
         const { data, error } = await supabase.rpc("toggle_moment_like", {
           p_moment_id: m.id,
         });
@@ -5340,6 +5351,7 @@
       foot.innerHTML = "";
       if (isMine) {
         foot.className = "mv-foot";
+        el.classList.remove("has-reply");
         foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><span class="mv-owner-tools"><button type="button" class="ghost-btn" id="mvLikes">♥ 0</button><button type="button" class="ghost-btn" id="mvFwdToggle">↗ Forwarding on</button><button type="button" class="ghost-btn" id="mvFwdOwn">Forward</button><button type="button" class="ghost-btn" id="mvDelete">Delete</button></span>`;
         paintEngagement();
         refreshCounts();
