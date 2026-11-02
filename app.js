@@ -5426,8 +5426,56 @@
       }
     }
     el.querySelector(".mv-close").onclick = close;
-    el.querySelector(".mv-next").onclick = () => go(1);
-    el.querySelector(".mv-prev").onclick = () => go(-1);
+    // Press and hold pauses; swipe down closes. A hold or swipe must not also count as a tap.
+    let holdTimer = null,
+      held = false,
+      swallow = false,
+      tracking = false,
+      startX = 0,
+      startY = 0;
+    el.querySelectorAll(".mv-prev, .mv-next").forEach((zone) => {
+      zone.addEventListener("pointerdown", (e) => {
+        tracking = true;
+        held = false;
+        swallow = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        clearTimeout(holdTimer);
+        holdTimer = setTimeout(() => {
+          held = true;
+          pauseMoment();
+        }, 260);
+      });
+      const finish = (e, cancelled) => {
+        clearTimeout(holdTimer);
+        if (!tracking) return;
+        tracking = false;
+        const dy = e.clientY - startY,
+          dx = e.clientX - startX;
+        if (!cancelled && dy > 100 && Math.abs(dx) < 80) {
+          swallow = true;
+          close();
+          return;
+        }
+        if (held) {
+          swallow = true;
+          held = false;
+          resumeMoment();
+        }
+        if (cancelled) swallow = true;
+      };
+      zone.addEventListener("pointerup", (e) => finish(e, false));
+      zone.addEventListener("pointercancel", (e) => finish(e, true));
+    });
+    const tap = (step) => () => {
+      if (swallow) {
+        swallow = false;
+        return;
+      }
+      go(step);
+    };
+    el.querySelector(".mv-next").onclick = tap(1);
+    el.querySelector(".mv-prev").onclick = tap(-1);
     document.addEventListener("keydown", onKey);
     loadEngagement();
     show();
@@ -6159,6 +6207,21 @@
     });
   }
   // Small bridge for ai.js (the AI assistant screen).
+  // Keeps bottom bars and sheets above the on-screen keyboard (sets --kb).
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const updateKb = () => {
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty(
+        "--kb",
+        (kb > 80 ? Math.round(kb) : 0) + "px",
+      );
+    };
+    vv.addEventListener("resize", updateKb);
+    vv.addEventListener("scroll", updateKb);
+    updateKb();
+  }
+
   window.ChatSpaceApp = {
     get supabase() {
       return supabase;

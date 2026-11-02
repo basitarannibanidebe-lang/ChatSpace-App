@@ -360,7 +360,26 @@
     leafletPromise = Promise.all([cssReady, jsReady]);
     return leafletPromise;
   }
+  function setMapFull(on) {
+    const box = $("dcMap");
+    if (!box) return;
+    box.classList.toggle("full", on);
+    document.body.classList.toggle("dc-no-scroll", on);
+    if (state.map) {
+      setTimeout(() => state.map && state.map.invalidateSize(), 60);
+      if (on)
+        setTimeout(
+          () => state.mapPoints.length && fitAll(state.map, state.mapPoints),
+          120,
+        );
+    }
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.body.classList.contains("dc-no-scroll"))
+      setMapFull(false);
+  });
   function destroyMap() {
+    document.body.classList.remove("dc-no-scroll");
     mapToken++;
     if (state.map) {
       state.map.remove();
@@ -423,8 +442,9 @@
         <select id="dcRadius">${[5, 25, 100].map((k) => `<option value="${k}" ${k === state.radius ? "selected" : ""}>${k} km</option>`).join("")}</select>
         <button type="button" class="ghost-btn" id="dcRefresh">Refresh</button>
       </div>
-      <div id="dcMap" class="dc-map"></div>
+      <div id="dcMap" class="dc-map"><button type="button" class="dc-map-close" id="dcMapClose" aria-label="Close full screen map">✕</button></div>
       <div class="dc-map-tools">
+        <button type="button" class="ghost-btn" id="dcMapFull">⤢ Full screen</button>
         <button type="button" class="ghost-btn" id="dcMapMe">📍 Center on me</button>
         <button type="button" class="ghost-btn" id="dcMapAll">Show everyone</button>
       </div>
@@ -437,6 +457,8 @@
       runMap(false);
     });
     $("dcRefresh").addEventListener("click", () => runMap(true));
+    $("dcMapFull").addEventListener("click", () => setMapFull(true));
+    $("dcMapClose").addEventListener("click", () => setMapFull(false));
     $("dcMapMe").addEventListener("click", () => {
       if (state.map && state.mapMe)
         state.map.flyTo(state.mapMe, 12, { duration: 0.6 });
@@ -492,6 +514,7 @@
       });
   }
   function openPerson(p) {
+    setMapFull(false);
     app().startConversation({
       id: p.user_id,
       username: p.username,

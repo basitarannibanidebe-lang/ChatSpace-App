@@ -15,9 +15,7 @@
   border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  font:
-    700 14px "DM Sans",
-    sans-serif;
+  font: 700 14px "DM Sans", sans-serif;
   cursor: pointer;
 }
 .dc-tab[aria-selected="true"] {
@@ -147,9 +145,7 @@
   border-radius: 12px;
   background: var(--panel2);
   color: var(--text);
-  font:
-    600 14px "DM Sans",
-    sans-serif;
+  font: 600 14px "DM Sans", sans-serif;
 }
 .dc-person-actions button {
   white-space: nowrap;
@@ -205,8 +201,7 @@
 }
 /* Dark map to match the app (tiles are inverted, popups and pins are not) */
 .dc-map .leaflet-tile-pane {
-  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9)
-    saturate(0.55);
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.55);
 }
 .dc-map .leaflet-control-attribution {
   background: rgba(9, 12, 20, 0.72);
@@ -266,9 +261,7 @@
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  font:
-    800 14px/1 "DM Sans",
-    sans-serif;
+  font: 800 14px/1 "DM Sans", sans-serif;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
   transition: transform 0.12s ease;
 }
@@ -310,6 +303,71 @@
 }
 @media (max-width: 380px) {
   .dc-tabs.three .dc-tab {
+    font-size: 12px;
+  }
+}
+
+/* =========================================================
+   MOBILE PASS: map and people lists
+========================================================= */
+.dc-map {
+  height: clamp(280px, 48dvh, 440px);
+  overscroll-behavior: contain;
+}
+.dc-map .dc-map-close {
+  display: none;
+}
+.dc-map.full {
+  position: fixed;
+  inset: 0;
+  z-index: 175;
+  height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.dc-map.full .dc-map-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 12px;
+  z-index: 1000;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+.dc-map.full .leaflet-bottom {
+  bottom: env(safe-area-inset-bottom, 0px);
+}
+.dc-no-scroll {
+  overflow: hidden;
+}
+.dc-map-tools {
+  flex-wrap: wrap;
+}
+.dc-map-tools .ghost-btn {
+  min-width: 96px;
+}
+.dc-map .leaflet-bar a {
+  width: 40px;
+  height: 40px;
+  line-height: 40px;
+}
+@media (max-width: 380px) {
+  .dc-person {
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .dc-person-actions button {
+    padding: 4px 10px;
     font-size: 12px;
   }
 }

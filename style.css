@@ -5340,3 +5340,81 @@ button.mf-row:hover {
     transition: none;
   }
 }
+
+/* =========================================================
+   MOBILE PASS: keyboard, touch, gestures, dynamic viewport
+========================================================= */
+button,
+[role="button"],
+a,
+input,
+select,
+textarea,
+label {
+  touch-action: manipulation;
+}
+.moment-viewer {
+  height: 100dvh;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  --foot: calc(84px + env(safe-area-inset-bottom, 0px) + var(--kb, 0px));
+}
+.moment-viewer.has-reply {
+  --foot: calc(158px + env(safe-area-inset-bottom, 0px) + var(--kb, 0px));
+}
+.moment-viewer input,
+.moment-viewer textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.mv-prev,
+.mv-next {
+  touch-action: none;
+}
+.mv-foot {
+  bottom: var(--kb, 0px);
+}
+.mv-foot.has-reply {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.mv-gifs .gif-grid {
+  max-height: min(180px, 24dvh);
+  overscroll-behavior: contain;
+}
+.mv-modal {
+  max-height: calc(100dvh - var(--kb, 0px) - 24px);
+  overscroll-behavior: contain;
+}
+.mf-list {
+  max-height: min(50dvh, 420px);
+  overscroll-behavior: contain;
+}
+@media (max-width: 600px) {
+  .mv-modal-back {
+    padding-bottom: var(--kb, 0px);
+  }
+  .mv-modal {
+    max-height: calc(100dvh - var(--kb, 0px) - 12px);
+    overflow-y: auto;
+  }
+}
+@media (max-height: 560px) {
+  /* landscape phones: keep the controls usable */
+  .mv-reply input,
+  .mv-btn {
+    height: 40px;
+  }
+  .mv-btn {
+    width: 40px;
+    min-width: 40px;
+  }
+  .moment-viewer.has-reply {
+    --foot: calc(130px + env(safe-area-inset-bottom, 0px) + var(--kb, 0px));
+  }
+  .mv-caption,
+  .mv-recap {
+    font-size: 14px;
+  }
+}
