@@ -336,20 +336,26 @@
   function loadLeaflet() {
     if (window.L) return Promise.resolve();
     if (leafletPromise) return leafletPromise;
-    leafletPromise = new Promise((resolve, reject) => {
+    const fail = () => {
+      leafletPromise = null;
+      return new Error("Couldn't load the map. Check your connection.");
+    };
+    const cssReady = new Promise((resolve, reject) => {
       const css = document.createElement("link");
       css.rel = "stylesheet";
       css.href = LEAFLET + "/leaflet.css";
+      css.onload = resolve;
+      css.onerror = () => reject(fail());
       document.head.appendChild(css);
+    });
+    const jsReady = new Promise((resolve, reject) => {
       const js = document.createElement("script");
       js.src = LEAFLET + "/leaflet.js";
       js.onload = resolve;
-      js.onerror = () => {
-        leafletPromise = null;
-        reject(new Error("Couldn't load the map. Check your connection."));
-      };
+      js.onerror = () => reject(fail());
       document.head.appendChild(js);
     });
+    leafletPromise = Promise.all([cssReady, jsReady]);
     return leafletPromise;
   }
   function destroyMap() {
@@ -468,7 +474,13 @@
       state.map = null;
     }
     const L = window.L;
-    const map = L.map("dcMap", { minZoom: 4, maxZoom: 15, zoomControl: true });
+    const map = L.map("dcMap", {
+      center: [9.08, 7.4],
+      zoom: 5,
+      minZoom: 4,
+      maxZoom: 15,
+      zoomControl: true,
+    });
     state.map = map;
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 15,
@@ -482,8 +494,9 @@
         areas.set(key, { lat: r.lat, lng: r.lng, people: [] });
       areas.get(key).people.push(r);
     }
-    const layers = [];
+    const points = [];
     for (const a of areas.values()) {
+      points.push([a.lat, a.lng]);
       const mine = a.people.some((p) => p.is_me);
       const circle = L.circle([a.lat, a.lng], {
         radius: 1000,
@@ -524,14 +537,14 @@
         box.appendChild(line);
       }
       circle.bindPopup(box);
-      layers.push(circle);
     }
-    if (layers.length)
-      map.fitBounds(L.featureGroup(layers).getBounds().pad(0.3), {
-        maxZoom: 13,
-      });
-    else map.setView([9.08, 7.4], 5);
-    setTimeout(() => map.invalidateSize(), 60);
+    map.invalidateSize();
+    if (points.length === 1) map.setView(points[0], 12);
+    else if (points.length > 1)
+      map.fitBounds(L.latLngBounds(points).pad(0.35), { maxZoom: 13 });
+    setTimeout(() => {
+      if (state.map === map) map.invalidateSize();
+    }, 80);
     const others = rows.filter((r) => !r.is_me).length;
     const note = $("dcMapNote");
     note.className = "muted tiny";
