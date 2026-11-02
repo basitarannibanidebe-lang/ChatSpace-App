@@ -754,10 +754,14 @@
     const { data } = await supabase.rpc("get_user_badges", {
       target_user: currentUser.id,
     });
+    const { data: likeTotal } = await supabase.rpc("get_profile_likes", {
+      p_user_id: currentUser.id,
+    });
     const owned = new Set((data || []).map((b) => b.badge_key));
     box.innerHTML = `
-      <div class="stats-tiles">
+      <div class="stats-tiles four">
         <div><strong>⭐ ${total}</strong><span>Total score</span></div>
+        <div><strong>❤️ ${likeTotal || 0}</strong><span>Moment likes</span></div>
         <div><strong>🔥 ${active}</strong><span>Active streaks</span></div>
         <div><strong>🏅 ${best}</strong><span>Best streak</span></div>
       </div>
@@ -1804,6 +1808,9 @@
       body += quote.outerHTML;
     }
 
+    if (msg.moment_ref && !msg.deleted_for_everyone)
+      body += momentRefHtml(msg.moment_ref);
+
     if (msg.content) {
       body += `<div>${escapeHtml(msg.content)}</div>`;
     }
@@ -1951,6 +1958,11 @@
     actions.appendChild(hideButton);
 
     row.append(bubble, reactionBar, actions, meta);
+
+    row.querySelector(".moment-ref")?.addEventListener("click", (e) => {
+      const b = e.currentTarget;
+      openMomentById(b.dataset.owner, b.dataset.mid);
+    });
 
     const image = row.querySelector(".chat-image");
 
@@ -3631,6 +3643,16 @@
     $("peerProfileStatus").textContent = status;
     $("peerProfileStatus").classList.toggle("online", status === "Online");
     $("peerProfileBio").textContent = p.bio || "No bio yet.";
+    const likesEl = $("peerProfileLikes");
+    if (likesEl) {
+      likesEl.textContent = "";
+      supabase
+        .rpc("get_profile_likes", { p_user_id: p.id })
+        .then(({ data: n, error: likeErr }) => {
+          if (likeErr || profilePeer?.id !== p.id) return;
+          likesEl.textContent = `❤️ ${n || 0} moment like${n === 1 ? "" : "s"}`;
+        });
+    }
     $("contactNameInput").value = contactNames.get(p.id) || "";
     $("peerBlockBtn").textContent = blockedIds.has(p.id)
       ? "Unblock user"
@@ -4749,6 +4771,7 @@
       <div class="accent-row" id="mcColors"></div>
       <label class="ghost-btn" for="mcFile">📷 Add a photo or video</label>
       <input id="mcFile" type="file" accept="image/*,video/*" hidden />
+      <label class="tiny mc-forward"><input type="checkbox" id="mcForward" checked /> Let people forward this moment</label>
       <p class="tiny pin-error" id="mcError"></p>
       <div class="pin-actions">
         <button type="button" class="ghost-btn" id="mcCancel">Cancel</button>
@@ -4859,6 +4882,7 @@
         } else {
           row = { user_id: currentUser.id, kind: "text", content: text, bg };
         }
+        if (!q("mcForward").checked) row.allow_forward = false;
         const { error } = await supabase.from("moments").insert(row);
         if (error) throw error;
         back.remove();
@@ -4874,7 +4898,7 @@
     };
   }
 
-  async function openMomentViewer(groupIndex) {
+  async function openMomentViewer(groupIndex, startId) {
     let group = momentGroups[groupIndex];
     if (!group) return;
     const isMine = group.userId === currentUser.id;
@@ -4886,7 +4910,9 @@
     let countTimer = null;
     let i = Math.max(
       0,
-      group.list.findIndex((m) => !m.seen),
+      startId
+        ? group.list.findIndex((m) => m.id === startId)
+        : group.list.findIndex((m) => !m.seen),
     );
     const el = document.createElement("div");
     el.className = "moment-viewer";
@@ -4910,10 +4936,72 @@
         v.removeAttribute("src");
         v.load();
       });
+    let paused = false;
+    let closed = false;
+    let cleanupReply = () => {};
+    const eng = new Map();
+    function pauseMoment() {
+      if (paused || closed) return;
+      paused = true;
+      clearTimeout(momentTimer);
+      bars
+        .querySelectorAll("span.now i")
+        .forEach((f) => (f.style.animationPlayState = "paused"));
+      el.querySelectorAll("video").forEach((v) => v.pause());
+    }
+    function resumeMoment() {
+      if (!paused || closed) return;
+      paused = false;
+      const cur = group.list[i];
+      el.querySelectorAll("video").forEach((v) => v.play().catch(() => {}));
+      if (cur && cur.kind !== "video") {
+        const fill = bars.querySelectorAll("span")[i]?.firstElementChild;
+        if (fill) {
+          fill.style.animationPlayState = "";
+          fill.style.animation = "none";
+          void fill.offsetWidth;
+          fill.style.animation = "";
+        }
+        clearTimeout(momentTimer);
+        momentTimer = setTimeout(() => go(1), 5000);
+      } else {
+        bars
+          .querySelectorAll("span.now i")
+          .forEach((f) => (f.style.animationPlayState = ""));
+      }
+    }
+    async function loadEngagement() {
+      const { data, error } = await supabase.rpc("get_moment_engagement", {
+        p_moment_ids: group.list.map((x) => x.id),
+      });
+      if (error) return;
+      for (const r of data || []) eng.set(r.moment_id, r);
+      paintEngagement();
+    }
+    function paintEngagement() {
+      const cur = group.list[i];
+      if (!cur) return;
+      const e = eng.get(cur.id) || {};
+      const likeBtn = el.querySelector("#mvLike");
+      if (likeBtn) {
+        likeBtn.textContent = e.liked_by_me ? "♥" : "♡";
+        likeBtn.classList.toggle("on", Boolean(e.liked_by_me));
+      }
+      const likesBtn = el.querySelector("#mvLikes");
+      if (likesBtn) likesBtn.textContent = `♥ ${Number(e.like_count) || 0}`;
+      const fwd = el.querySelector("#mvFwd");
+      if (fwd) fwd.classList.toggle("hidden", e.allow_forward === false);
+      const fwdToggle = el.querySelector("#mvFwdToggle");
+      if (fwdToggle)
+        fwdToggle.textContent =
+          e.allow_forward === false ? "↗ Forwarding off" : "↗ Forwarding on";
+    }
     const close = () => {
+      closed = true;
       clearTimeout(momentTimer);
       clearInterval(countTimer);
       document.removeEventListener("keydown", onKey);
+      cleanupReply();
       stopVideo();
       el.remove();
       renderMomentsBar();
@@ -4930,13 +5018,209 @@
       const label = el.querySelector("#mvViews");
       if (label && group.list[i])
         label.textContent = viewsText(group.list[i].view_count);
+      loadEngagement();
     }
     if (isMine) countTimer = setInterval(refreshCounts, 4000);
     const onKey = (e) => {
+      if (e.target?.closest?.("input, textarea")) {
+        if (e.key === "Escape") e.target.blur();
+        return;
+      }
+      if (document.querySelector(".mv-modal-back")) return;
       if (e.key === "Escape") close();
       if (e.key === "ArrowRight") go(1);
       if (e.key === "ArrowLeft") go(-1);
     };
+    function buildReplyFoot(m) {
+      const foot = el.querySelector("#mvFoot");
+      foot.className = "mv-foot has-reply";
+      const who = escapeHtml(
+        group.person.display_name || group.person.username,
+      );
+      foot.innerHTML = `<div class="mv-gifs hidden" id="mvGifs">
+          <input id="mvGifSearch" placeholder="Search GIFs" aria-label="Search GIFs" />
+          <div class="gif-grid" id="mvGifGrid"></div>
+          <small>Powered by KLIPY</small>
+        </div>
+        <div class="mv-reply">
+          <input id="mvReplyInput" maxlength="500" placeholder="Reply to ${who}…" autocomplete="off" />
+          <button type="button" class="mv-btn" id="mvGifBtn" aria-label="Send a GIF">GIF</button>
+          <button type="button" class="mv-btn" id="mvMicBtn" aria-label="Record a voice note">🎙</button>
+          <button type="button" class="mv-btn" id="mvSendBtn" aria-label="Send reply">➤</button>
+          <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment">♡</button>
+          <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment">↗</button>
+        </div>`;
+      const input = foot.querySelector("#mvReplyInput");
+      const gifBox = foot.querySelector("#mvGifs");
+      const micBtn = foot.querySelector("#mvMicBtn");
+      let focused = false,
+        recorder = null,
+        recStream = null,
+        recChunks = [],
+        recDiscard = false,
+        gifTimer = null;
+      const syncPause = () => {
+        const want =
+          focused ||
+          !gifBox.classList.contains("hidden") ||
+          recorder?.state === "recording" ||
+          input.value.trim();
+        if (want) pauseMoment();
+        else resumeMoment();
+      };
+      cleanupReply = () => {
+        clearTimeout(gifTimer);
+        if (recorder?.state === "recording") {
+          recDiscard = true;
+          recorder.stop();
+        }
+        recStream?.getTracks().forEach((t) => t.stop());
+        recStream = null;
+        cleanupReply = () => {};
+      };
+      const sendReply = async (extra) => {
+        try {
+          await sendMomentMessage(m, group.person, extra);
+          toast("Reply sent.");
+          input.value = "";
+          gifBox.classList.add("hidden");
+          focused = false;
+          input.blur();
+          syncPause();
+        } catch (err) {
+          toast(
+            err?.code === "42501"
+              ? "You can't send messages to this person."
+              : "Reply failed: " + (err.message || "try again"),
+          );
+        }
+      };
+      input.addEventListener("focus", () => {
+        focused = true;
+        syncPause();
+      });
+      input.addEventListener("blur", () => {
+        focused = false;
+        setTimeout(syncPause, 150);
+      });
+      input.addEventListener("input", syncPause);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && input.value.trim())
+          sendReply({ content: input.value.trim() });
+      });
+      foot.querySelector("#mvSendBtn").onclick = () => {
+        if (input.value.trim()) sendReply({ content: input.value.trim() });
+        else input.focus();
+      };
+      // GIF reply
+      const gifGrid = foot.querySelector("#mvGifGrid");
+      async function loadGifs() {
+        const term = foot.querySelector("#mvGifSearch").value.trim();
+        gifGrid.innerHTML = '<p class="tiny muted">Loading…</p>';
+        try {
+          const items = await fetchKlipy("gifs", term);
+          if (!items.length) {
+            gifGrid.innerHTML = '<p class="tiny muted">Nothing found.</p>';
+            return;
+          }
+          gifGrid.innerHTML = "";
+          for (const item of items) {
+            const cell = document.createElement("div");
+            cell.className = "gif-cell";
+            cell.innerHTML = `<img src="${escapeHtml(item.preview)}" alt="" loading="lazy" />`;
+            cell.querySelector("img").onclick = () =>
+              sendReply({ gifUrl: item.full });
+            gifGrid.appendChild(cell);
+          }
+        } catch (err) {
+          gifGrid.innerHTML = `<p class="tiny muted">Couldn't load: ${escapeHtml(err.message)}</p>`;
+        }
+      }
+      foot.querySelector("#mvGifBtn").onclick = () => {
+        const open = gifBox.classList.toggle("hidden") === false;
+        if (open) loadGifs();
+        syncPause();
+      };
+      foot.querySelector("#mvGifSearch").addEventListener("input", () => {
+        clearTimeout(gifTimer);
+        gifTimer = setTimeout(loadGifs, 350);
+      });
+      // Voice note reply
+      micBtn.onclick = async () => {
+        if (recorder?.state === "recording") {
+          recorder.stop();
+          return;
+        }
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
+          return toast("Voice recording isn't supported by this browser.");
+        try {
+          recStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+        } catch {
+          return toast("Microphone permission was denied or unavailable.");
+        }
+        recChunks = [];
+        recDiscard = false;
+        recorder = new MediaRecorder(recStream);
+        recorder.ondataavailable = (e) => {
+          if (e.data.size) recChunks.push(e.data);
+        };
+        recorder.onstop = async () => {
+          recStream?.getTracks().forEach((t) => t.stop());
+          micBtn.classList.remove("recording");
+          micBtn.textContent = "🎙";
+          const discard = recDiscard;
+          const blob = new Blob(recChunks, {
+            type: recorder.mimeType || "audio/webm",
+          });
+          if (discard) return;
+          if (!blob.size) return syncPause();
+          if (blob.size > 50 * 1024 * 1024) {
+            toast("Voice note is too large. Record a shorter note.");
+            return syncPause();
+          }
+          await sendReply({
+            file: new File([blob], `voice-note-${Date.now()}.webm`, {
+              type: blob.type,
+            }),
+          });
+          syncPause();
+        };
+        recorder.start();
+        micBtn.classList.add("recording");
+        micBtn.textContent = "■";
+        toast("Recording… tap ■ to send your voice note.");
+        syncPause();
+      };
+      // Like and forward
+      foot.querySelector("#mvLike").onclick = async (ev) => {
+        const e = eng.get(m.id) || {};
+        const was = Boolean(e.liked_by_me);
+        eng.set(m.id, { ...e, liked_by_me: !was });
+        paintEngagement();
+        ev.currentTarget.classList.add("pop");
+        setTimeout(() => ev.currentTarget?.classList.remove("pop"), 300);
+        const { data, error } = await supabase.rpc("toggle_moment_like", {
+          p_moment_id: m.id,
+        });
+        if (error) {
+          eng.set(m.id, { ...e, liked_by_me: was });
+          paintEngagement();
+          return toast("Couldn't like this moment: " + error.message);
+        }
+        eng.set(m.id, {
+          ...(eng.get(m.id) || e),
+          liked_by_me: Boolean(data?.liked),
+        });
+        paintEngagement();
+      };
+      foot.querySelector("#mvFwd").onclick = () => {
+        pauseMoment();
+        openForwardPicker(m, group.person, () => syncPause());
+      };
+      paintEngagement();
+    }
     function go(step) {
       i += step;
       if (i < 0) i = 0;
@@ -4945,6 +5229,8 @@
     }
     async function show() {
       clearTimeout(momentTimer);
+      cleanupReply();
+      paused = false;
       const m = group.list[i];
       bars.querySelectorAll("span").forEach((b, n) => {
         b.classList.toggle("done", n < i);
@@ -5023,8 +5309,33 @@
       const foot = el.querySelector("#mvFoot");
       foot.innerHTML = "";
       if (isMine) {
-        foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><button type="button" class="ghost-btn" id="mvDelete">Delete</button>`;
+        foot.className = "mv-foot";
+        foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><span class="mv-owner-tools"><button type="button" class="ghost-btn" id="mvLikes">♥ 0</button><button type="button" class="ghost-btn" id="mvFwdToggle">↗ Forwarding on</button><button type="button" class="ghost-btn" id="mvFwdOwn">Forward</button><button type="button" class="ghost-btn" id="mvDelete">Delete</button></span>`;
+        paintEngagement();
         refreshCounts();
+        foot.querySelector("#mvLikes").onclick = () => {
+          pauseMoment();
+          openLikersModal(m, resumeMoment);
+        };
+        foot.querySelector("#mvFwdOwn").onclick = () => {
+          pauseMoment();
+          openForwardPicker(m, group.person, resumeMoment);
+        };
+        foot.querySelector("#mvFwdToggle").onclick = async () => {
+          const e = eng.get(m.id) || {};
+          const next = e.allow_forward === false;
+          const { error } = await supabase.rpc("set_moment_forwarding", {
+            p_moment_id: m.id,
+            p_allow: next,
+          });
+          if (error)
+            return toast("Couldn't change forwarding: " + error.message);
+          eng.set(m.id, { ...e, allow_forward: next });
+          paintEngagement();
+          toast(
+            next ? "Others can forward this moment." : "Forwarding is off.",
+          );
+        };
         foot.querySelector("#mvDelete").onclick = async () => {
           clearTimeout(momentTimer);
           if (!window.confirm("Delete this moment?")) return show();
@@ -5054,6 +5365,7 @@
             }
           });
       }
+      if (!isMine) buildReplyFoot(m);
       // Photos and text: the bar fills over 5 seconds, then the next one plays.
       // Videos: the bar follows the video and moves on when it ends.
       const fill = bars.querySelectorAll("span")[i].firstElementChild;
@@ -5075,7 +5387,222 @@
     el.querySelector(".mv-next").onclick = () => go(1);
     el.querySelector(".mv-prev").onclick = () => go(-1);
     document.addEventListener("keydown", onKey);
+    loadEngagement();
     show();
+  }
+
+  // ---- Moments: replies, forwarding and the moment card in chat ----
+  async function conversationWith(userId) {
+    const { data: rows } = await supabase.rpc("get_my_chats");
+    const existing = (rows || []).find(
+      (r) => !r.is_group && r.peer_id === userId,
+    );
+    if (existing) return existing.conversation_id;
+    const { data: newId, error } = await supabase.rpc(
+      "create_private_conversation",
+      { other_user_id: userId },
+    );
+    if (error) throw error;
+    return newId;
+  }
+  // A tiny preview picture so the card still looks right after the moment expires.
+  async function momentThumb(m) {
+    if (m._thumb !== undefined) return m._thumb;
+    m._thumb = null;
+    try {
+      if (m.kind !== "image" || !m.media_path) return null;
+      const { data } = await supabase.storage
+        .from("moments")
+        .createSignedUrl(m.media_path, 120);
+      if (!data?.signedUrl) return null;
+      const blob = await (await fetch(data.signedUrl)).blob();
+      const bmp = await createImageBitmap(blob);
+      const scale = 72 / Math.max(bmp.width, bmp.height);
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(bmp.width * scale));
+      c.height = Math.max(1, Math.round(bmp.height * scale));
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      m._thumb = c.toDataURL("image/jpeg", 0.6);
+    } catch {}
+    return m._thumb;
+  }
+  async function buildMomentRef(m, person, forwarded) {
+    const ref = {
+      id: m.id,
+      owner_id: m.user_id,
+      owner_name: person.display_name || person.username || "",
+      kind: m.kind,
+      text: (m.content || "").slice(0, 120),
+    };
+    if (m.kind === "text") ref.bg = m.bg || MOMENT_BGS[0];
+    if (forwarded) ref.fwd = true;
+    const thumb = await momentThumb(m);
+    if (thumb) ref.thumb = thumb;
+    return ref;
+  }
+  // extra: { content, gifUrl, file, conversationId, forwarded }
+  async function sendMomentMessage(m, person, extra = {}) {
+    if (!navigator.onLine) throw new Error("You're offline.");
+    const convId = extra.conversationId || (await conversationWith(m.user_id));
+    let attachment_url = null,
+      attachment_path = null,
+      attachment_type = null;
+    if (extra.gifUrl) {
+      attachment_url = extra.gifUrl;
+      attachment_type = "image";
+    } else if (extra.file) {
+      const path = `${convId}/${currentUser.id}/${crypto.randomUUID()}.webm`;
+      const { error: upErr } = await supabase.storage
+        .from("chat-attachments")
+        .upload(path, extra.file, {
+          contentType: extra.file.type || "audio/webm",
+          upsert: false,
+        });
+      if (upErr) throw upErr;
+      const { data: signed, error: signErr } = await supabase.storage
+        .from("chat-attachments")
+        .createSignedUrl(path, 60 * 60 * 24 * 7);
+      if (signErr) throw signErr;
+      attachment_url = signed.signedUrl;
+      attachment_path = path;
+      attachment_type = "audio";
+    }
+    const moment_ref = await buildMomentRef(m, person, extra.forwarded);
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: convId,
+      sender_id: currentUser.id,
+      content: extra.content || null,
+      attachment_url,
+      attachment_path,
+      attachment_type,
+      moment_ref,
+    });
+    if (error) throw error;
+    if (activeConversation === convId) loadMessages();
+    loadChats();
+  }
+  function momentRefHtml(ref) {
+    if (!ref || typeof ref !== "object") return "";
+    const mine = ref.owner_id === currentUser.id;
+    const who = mine ? "Your moment" : escapeHtml(ref.owner_name || "A moment");
+    const title = ref.fwd ? "↗ Forwarded moment" : "↩ Replied to a moment";
+    const kindIcon =
+      ref.kind === "video" ? "🎬" : ref.kind === "image" ? "📷" : "";
+    const okThumb =
+      typeof ref.thumb === "string" &&
+      /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(ref.thumb);
+    const bg = MOMENT_BGS.includes(ref.bg) ? ref.bg : MOMENT_BGS[0];
+    const thumb = okThumb
+      ? `<img src="${ref.thumb}" alt="" />`
+      : ref.kind === "text"
+        ? `<i style="background:${bg}">${escapeHtml((ref.text || "").slice(0, 18))}</i>`
+        : `<i>${kindIcon}</i>`;
+    const snippet = ref.text
+      ? escapeHtml(ref.text)
+      : ref.kind === "video"
+        ? "Video"
+        : ref.kind === "image"
+          ? "Photo"
+          : "Moment";
+    return `<button type="button" class="moment-ref" data-owner="${escapeHtml(ref.owner_id || "")}" data-mid="${escapeHtml(ref.id || "")}"><span class="mr-thumb">${thumb}</span><span class="mr-meta"><small>${title}</small><strong>${who}</strong><em>${snippet}</em></span></button>`;
+  }
+  function openMomentById(ownerId, momentId) {
+    const idx = momentGroups.findIndex((g) => g.userId === ownerId);
+    const has =
+      idx >= 0 && momentGroups[idx].list.some((x) => x.id === momentId);
+    if (!has)
+      return toast("This moment has expired or isn't available to you.");
+    openMomentViewer(idx, momentId);
+  }
+  function momentModal(html) {
+    const back = document.createElement("div");
+    back.className = "pin-backdrop mv-modal-back";
+    back.innerHTML = `<div class="pin-box mv-modal" role="dialog" aria-modal="true">${html}</div>`;
+    document.body.appendChild(back);
+    return back;
+  }
+  function openForwardPicker(m, person, onClose) {
+    const back = momentModal(`<h3>Forward moment</h3>
+      <input id="mfSearch" placeholder="Search chats" aria-label="Search chats" />
+      <div class="mf-list" id="mfList"></div>
+      <div class="pin-actions"><button type="button" class="ghost-btn" id="mfCancel">Cancel</button></div>`);
+    const done = () => {
+      back.remove();
+      onClose?.();
+    };
+    const list = back.querySelector("#mfList");
+    const draw = () => {
+      const term = back.querySelector("#mfSearch").value.trim().toLowerCase();
+      const rows = (lastPeers || []).filter((p) =>
+        (peerName(p) + " " + (p.username || "")).toLowerCase().includes(term),
+      );
+      list.innerHTML = rows.length
+        ? ""
+        : '<p class="tiny muted">No chats found.</p>';
+      for (const p of rows) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "mf-row";
+        b.innerHTML = `<span class="user-avatar">${avatarInner(p)}</span><span>${escapeHtml(peerName(p))}</span>`;
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            await sendMomentMessage(m, person, {
+              conversationId: p.conversationId,
+              content: "↗ Forwarded moment",
+              forwarded: true,
+            });
+            toast("Forwarded to " + peerName(p) + ".");
+            done();
+          } catch (err) {
+            b.disabled = false;
+            toast(
+              err?.code === "42501"
+                ? "You can't send messages to this person."
+                : "Forward failed: " + (err.message || "try again"),
+            );
+          }
+        };
+        list.appendChild(b);
+      }
+    };
+    back.querySelector("#mfSearch").addEventListener("input", draw);
+    back.querySelector("#mfCancel").onclick = done;
+    back.addEventListener("click", (e) => {
+      if (e.target === back) done();
+    });
+    draw();
+  }
+  async function openLikersModal(m, onClose) {
+    const back = momentModal(`<h3>Likes</h3>
+      <div class="mf-list" id="mlList"><p class="tiny muted">Loading…</p></div>
+      <div class="pin-actions"><button type="button" class="ghost-btn" id="mlClose">Close</button></div>`);
+    const done = () => {
+      back.remove();
+      onClose?.();
+    };
+    back.querySelector("#mlClose").onclick = done;
+    back.addEventListener("click", (e) => {
+      if (e.target === back) done();
+    });
+    const { data, error } = await supabase.rpc("get_moment_likers", {
+      p_moment_id: m.id,
+    });
+    const list = back.querySelector("#mlList");
+    if (error) {
+      list.innerHTML = `<p class="tiny muted">Couldn't load: ${escapeHtml(error.message)}</p>`;
+      return;
+    }
+    list.innerHTML = (data || []).length
+      ? ""
+      : '<p class="tiny muted">No likes yet.</p>';
+    for (const r of data || []) {
+      const row = document.createElement("div");
+      row.className = "mf-row";
+      const who = { ...r, id: r.user_id };
+      row.innerHTML = `<span class="user-avatar">${avatarInner(who)}</span><span>${escapeHtml(peerName(who))}</span>`;
+      list.appendChild(row);
+    }
   }
 
   // ---- Contact names (private to you) and profile links ----

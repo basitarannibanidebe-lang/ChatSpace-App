@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v10-groupcalls";
+const CACHE_NAME = "chatspace-v11-moments-social";
 const APP_FILES = [
   "/",
   "/index.html",
