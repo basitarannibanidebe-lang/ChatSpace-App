@@ -61,6 +61,8 @@
     radius: 25,
     cc: localStorage.getItem("chatspace-cc") || guessCountryCode(),
     myPhoneSaved: false,
+    map: null,
+    mapVisible: false,
   };
 
   /* ---------- phone numbers ---------- */
@@ -147,6 +149,7 @@
       state.loaded = false;
       state.tab = "nearby";
     }
+    destroyMap();
     box.innerHTML = `<p class="muted tiny">Loading…</p>`;
     try {
       if (!state.loaded) await loadSettings();
@@ -160,8 +163,9 @@
   function render() {
     const box = root();
     box.innerHTML = `
-      <div class="dc-tabs" role="tablist">
+      <div class="dc-tabs three" role="tablist">
         <button type="button" role="tab" class="dc-tab" data-tab="nearby" aria-selected="${state.tab === "nearby"}">📍 Nearby</button>
+        <button type="button" role="tab" class="dc-tab" data-tab="map" aria-selected="${state.tab === "map"}">🗺 Map</button>
         <button type="button" role="tab" class="dc-tab" data-tab="contacts" aria-selected="${state.tab === "contacts"}">👥 Contacts</button>
       </div>
       <div id="dcBody"></div>`;
@@ -171,7 +175,10 @@
         render();
       }),
     );
-    (state.tab === "nearby" ? renderNearby : renderContacts)($("dcBody"));
+    destroyMap();
+    ({ nearby: renderNearby, map: renderMap, contacts: renderContacts })[
+      state.tab
+    ]($("dcBody"));
   }
 
   const personRow = (p, sub, extra = "") => `
@@ -208,7 +215,7 @@
           <p class="muted">Turn this on to see other ChatSpace users around you, and to let them see you.</p>
           <ul class="dc-points">
             <li>Only a <strong>rough area (about 2 km)</strong> is saved, never your exact spot.</li>
-            <li>People only see an <strong>approximate distance</strong>. There is no map.</li>
+            <li>People only see an <strong>approximate distance</strong>. A map is separate and off unless you choose it in the Map tab.</li>
             <li>You only appear to people who have also turned it on.</li>
             <li>You can switch it off at any time and your location is deleted.</li>
           </ul>
@@ -321,6 +328,216 @@
       if (token === nearbyToken && $("dcResults"))
         out.innerHTML = `<p class="dc-error">${esc(err.message)}</p>`;
     }
+  }
+
+  /* ----- map ----- */
+  const LEAFLET = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist";
+  let leafletPromise = null;
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve();
+    if (leafletPromise) return leafletPromise;
+    leafletPromise = new Promise((resolve, reject) => {
+      const css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = LEAFLET + "/leaflet.css";
+      document.head.appendChild(css);
+      const js = document.createElement("script");
+      js.src = LEAFLET + "/leaflet.js";
+      js.onload = resolve;
+      js.onerror = () => {
+        leafletPromise = null;
+        reject(new Error("Couldn't load the map. Check your connection."));
+      };
+      document.head.appendChild(js);
+    });
+    return leafletPromise;
+  }
+  function destroyMap() {
+    mapToken++;
+    if (state.map) {
+      state.map.remove();
+      state.map = null;
+    }
+  }
+  let mapToken = 0;
+
+  async function renderMap(body) {
+    if (!state.settings.nearby_enabled) {
+      body.innerHTML = `<div class="dc-card"><h3>Map</h3><p class="muted">Turn on Nearby first. After that you can choose to appear on the map.</p><button type="button" class="primary-btn full" id="dcMapGo">Go to Nearby</button></div>`;
+      $("dcMapGo").addEventListener("click", () => {
+        state.tab = "nearby";
+        render();
+      });
+      return;
+    }
+    body.innerHTML = `<p class="muted tiny">Loading…</p>`;
+    const { data, error } = await app()
+      .supabase.from("discovery_settings")
+      .select("map_visible")
+      .eq("user_id", app().user.id)
+      .maybeSingle();
+    if (state.tab !== "map" || !$("dcBody")) return;
+    if (error) {
+      body.innerHTML = `<p class="dc-error">${esc(/does not exist|schema cache/i.test(error.message) ? "The map isn't set up yet. Run chatspace_discover_map.sql in Supabase." : error.message)}</p>`;
+      return;
+    }
+    state.mapVisible = Boolean(data?.map_visible);
+    if (!state.mapVisible) {
+      body.innerHTML = `
+        <div class="dc-card">
+          <h3>Appear on the map</h3>
+          <p class="muted">See nearby people on a map, and let them see you.</p>
+          <ul class="dc-points">
+            <li>You show as a <strong>circle about 2 km wide</strong>, never a pin on your exact spot.</li>
+            <li>The map can't zoom in past city level, and it isn't live tracking.</li>
+            <li>Only people who also chose to appear on the map can see you, and you see only them.</li>
+            <li>Turn it off any time and you disappear from the map right away.</li>
+          </ul>
+          <button type="button" class="primary-btn full" id="dcMapOn">Show me on the map</button>
+          <p id="dcMsg" class="dc-error" role="status"></p>
+        </div>`;
+      $("dcMapOn").addEventListener("click", async (e) => {
+        setBusy(e.currentTarget, true, "Turning on…");
+        try {
+          await rpc("set_map_visibility", { visible: true });
+          state.mapVisible = true;
+          renderMap($("dcBody"));
+        } catch (err) {
+          $("dcMsg").textContent = err.message;
+          setBusy(e.currentTarget, false, "Show me on the map");
+        }
+      });
+      return;
+    }
+    body.innerHTML = `
+      <div class="dc-row">
+        <label for="dcRadius" class="muted">Within</label>
+        <select id="dcRadius">${[5, 25, 100].map((k) => `<option value="${k}" ${k === state.radius ? "selected" : ""}>${k} km</option>`).join("")}</select>
+        <button type="button" class="ghost-btn" id="dcRefresh">Refresh</button>
+      </div>
+      <div id="dcMap" class="dc-map"></div>
+      <p id="dcMapNote" class="muted tiny" role="status">Looking…</p>
+      <button type="button" class="ghost-btn danger full" id="dcMapOff">Hide me from the map</button>
+      <p id="dcMsg" class="dc-error" role="status"></p>`;
+    $("dcRadius").addEventListener("change", (e) => {
+      state.radius = Number(e.target.value);
+      runMap(false);
+    });
+    $("dcRefresh").addEventListener("click", () => runMap(true));
+    $("dcMapOff").addEventListener("click", async (e) => {
+      setBusy(e.currentTarget, true);
+      try {
+        await rpc("set_map_visibility", { visible: false });
+        state.mapVisible = false;
+        toast("You're hidden from the map.");
+        render();
+      } catch (err) {
+        $("dcMsg").textContent = err.message;
+        setBusy(e.currentTarget, false);
+      }
+    });
+    runMap(true);
+  }
+
+  async function runMap(refreshLocation) {
+    const token = ++mapToken;
+    const note = $("dcMapNote");
+    if (!note) return;
+    note.className = "muted tiny";
+    note.textContent = "Looking…";
+    try {
+      await loadLeaflet();
+      if (refreshLocation)
+        await shareLocation().catch((err) => {
+          if (/denied/i.test(err.message)) throw err;
+        });
+      const rows =
+        (await rpc("find_nearby_map", { max_km: state.radius })) || [];
+      if (token !== mapToken || !$("dcMap")) return;
+      drawMap(rows);
+    } catch (err) {
+      if (token !== mapToken || !$("dcMapNote")) return;
+      $("dcMapNote").className = "dc-error";
+      $("dcMapNote").textContent = err.message;
+    }
+  }
+
+  function drawMap(rows) {
+    if (state.map) {
+      state.map.remove();
+      state.map = null;
+    }
+    const L = window.L;
+    const map = L.map("dcMap", { minZoom: 4, maxZoom: 15, zoomControl: true });
+    state.map = map;
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 15,
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
+    // One circle per ~2 km area; everyone in that area is listed in its popup.
+    const areas = new Map();
+    for (const r of rows) {
+      const key = r.lat.toFixed(3) + "," + r.lng.toFixed(3);
+      if (!areas.has(key))
+        areas.set(key, { lat: r.lat, lng: r.lng, people: [] });
+      areas.get(key).people.push(r);
+    }
+    const layers = [];
+    for (const a of areas.values()) {
+      const mine = a.people.some((p) => p.is_me);
+      const circle = L.circle([a.lat, a.lng], {
+        radius: 1000,
+        color: mine ? "#16a34a" : "#5d58db",
+        weight: 2,
+        fillOpacity: 0.25,
+      }).addTo(map);
+      const box = document.createElement("div");
+      box.className = "dc-popup";
+      for (const p of a.people) {
+        const line = document.createElement("div");
+        line.className = "dc-popup-row";
+        const name = document.createElement("strong");
+        name.textContent = p.is_me
+          ? "You (approximate area)"
+          : p.display_name || p.username;
+        line.appendChild(name);
+        if (!p.is_me) {
+          const sub = document.createElement("small");
+          sub.textContent =
+            p.distance_km < 3
+              ? "Less than 3 km away"
+              : `About ${p.distance_km} km away`;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "primary-btn dc-msg";
+          btn.textContent = "Message";
+          btn.addEventListener("click", () =>
+            app().startConversation({
+              id: p.user_id,
+              username: p.username,
+              display_name: p.display_name,
+              avatar_url: p.avatar_url,
+            }),
+          );
+          line.append(sub, btn);
+        }
+        box.appendChild(line);
+      }
+      circle.bindPopup(box);
+      layers.push(circle);
+    }
+    if (layers.length)
+      map.fitBounds(L.featureGroup(layers).getBounds().pad(0.3), {
+        maxZoom: 13,
+      });
+    else map.setView([9.08, 7.4], 5);
+    setTimeout(() => map.invalidateSize(), 60);
+    const others = rows.filter((r) => !r.is_me).length;
+    const note = $("dcMapNote");
+    note.className = "muted tiny";
+    note.textContent = others
+      ? `${others} ${others === 1 ? "person" : "people"} on the map. Circles are about 2 km wide. Tap one to see who's there.`
+      : "No one else is on the map yet. Only people who chose to appear here are shown.";
   }
 
   /* ----- contacts ----- */

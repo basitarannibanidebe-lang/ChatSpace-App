@@ -154,3 +154,43 @@
 .dc-person-actions button {
   white-space: nowrap;
 }
+
+/* Map tab */
+.dc-tabs.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+.dc-tabs.three .dc-tab {
+  padding: 0 4px;
+  font-size: 13px;
+}
+.dc-map {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  height: 340px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.dc-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 140px;
+  color: #111;
+}
+.dc-popup-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dc-popup-row small {
+  color: #555;
+}
+.dc-popup-row .dc-msg {
+  margin-top: 4px;
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
