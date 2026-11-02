@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v11-moments-social";
+const CACHE_NAME = "chatspace-v13-discover";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -8,6 +8,8 @@ const APP_FILES = [
   "/enhance.js",
   "/ai.js",
   "/ai.css",
+  "/discover.js",
+  "/discover.css",
   "/manifest.json",
   "/config.js",
 ];

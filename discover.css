@@ -15,7 +15,9 @@
   border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  font: 700 14px "DM Sans", sans-serif;
+  font:
+    700 14px "DM Sans",
+    sans-serif;
   cursor: pointer;
 }
 .dc-tab[aria-selected="true"] {
@@ -145,7 +147,9 @@
   border-radius: 12px;
   background: var(--panel2);
   color: var(--text);
-  font: 600 14px "DM Sans", sans-serif;
+  font:
+    600 14px "DM Sans",
+    sans-serif;
 }
 .dc-person-actions button {
   white-space: nowrap;

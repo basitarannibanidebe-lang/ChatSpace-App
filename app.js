@@ -3285,7 +3285,7 @@
 
   // New chat panel
   function ncShow(step) {
-    ["ncHome", "ncPersonStep", "ncGroupStep"].forEach((id) =>
+    ["ncHome", "ncPersonStep", "ncDiscoverStep", "ncGroupStep"].forEach((id) =>
       $(id).classList.toggle("hidden", id !== step),
     );
   }
@@ -4940,6 +4940,7 @@
     let closed = false;
     let cleanupReply = () => {};
     const eng = new Map();
+    const resh = new Map();
     function pauseMoment() {
       if (paused || closed) return;
       paused = true;
@@ -4971,12 +4972,32 @@
       }
     }
     async function loadEngagement() {
-      const { data, error } = await supabase.rpc("get_moment_engagement", {
-        p_moment_ids: group.list.map((x) => x.id),
-      });
-      if (error) return;
+      const ids = group.list.map((x) => x.id);
+      const [{ data, error }, rs] = await Promise.all([
+        supabase.rpc("get_moment_engagement", { p_moment_ids: ids }),
+        supabase.rpc("get_moment_reshares", { p_moment_ids: ids }),
+      ]);
+      if (!rs.error) for (const r of rs.data || []) resh.set(r.moment_id, r);
+      if (error) return paintEngagement();
       for (const r of data || []) eng.set(r.moment_id, r);
       paintEngagement();
+    }
+    function paintReshare() {
+      el.querySelectorAll(".mv-reshare, .mv-recap").forEach((n) => n.remove());
+      const cur = group.list[i];
+      const r = cur && resh.get(cur.id);
+      if (!r) return;
+      const from = r.original_display_name || r.original_username || "someone";
+      const tag = document.createElement("div");
+      tag.className = "mv-reshare";
+      tag.textContent = "↻ Reshared from " + from;
+      el.appendChild(tag);
+      if (r.caption) {
+        const cap = document.createElement("div");
+        cap.className = "mv-recap";
+        cap.textContent = r.caption;
+        el.appendChild(cap);
+      }
     }
     function paintEngagement() {
       const cur = group.list[i];
@@ -4991,6 +5012,9 @@
       if (likesBtn) likesBtn.textContent = `♥ ${Number(e.like_count) || 0}`;
       const fwd = el.querySelector("#mvFwd");
       if (fwd) fwd.classList.toggle("hidden", e.allow_forward === false);
+      const rp = el.querySelector("#mvRepost");
+      if (rp) rp.classList.toggle("hidden", e.allow_forward === false);
+      paintReshare();
       const fwdToggle = el.querySelector("#mvFwdToggle");
       if (fwdToggle)
         fwdToggle.textContent =
@@ -5049,6 +5073,7 @@
           <button type="button" class="mv-btn" id="mvSendBtn" aria-label="Send reply">➤</button>
           <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment">♡</button>
           <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment">↗</button>
+          <button type="button" class="mv-btn" id="mvRepost" aria-label="Reshare to your moments">↻</button>
         </div>`;
       const input = foot.querySelector("#mvReplyInput");
       const gifBox = foot.querySelector("#mvGifs");
@@ -5219,6 +5244,10 @@
         pauseMoment();
         openForwardPicker(m, group.person, () => syncPause());
       };
+      foot.querySelector("#mvRepost").onclick = () => {
+        pauseMoment();
+        openReshareModal(m, group.person, () => syncPause());
+      };
       paintEngagement();
     }
     function go(step) {
@@ -5231,6 +5260,7 @@
       clearTimeout(momentTimer);
       cleanupReply();
       paused = false;
+      el.querySelectorAll(".mv-reshare, .mv-recap").forEach((n) => n.remove());
       const m = group.list[i];
       bars.querySelectorAll("span").forEach((b, n) => {
         b.classList.toggle("done", n < i);
@@ -5520,6 +5550,95 @@
     back.innerHTML = `<div class="pin-box mv-modal" role="dialog" aria-modal="true">${html}</div>`;
     document.body.appendChild(back);
     return back;
+  }
+  function openReshareModal(m, person, onClose) {
+    const name = escapeHtml(person.display_name || person.username || "them");
+    const back = momentModal(`<h3>Reshare to your moments</h3>
+      <p class="tiny muted">Posts a copy of ${name}'s moment on your profile for 24 hours, credited to ${name}.</p>
+      <textarea id="rsCaption" maxlength="200" rows="3" placeholder="Add a caption (optional)"></textarea>
+      <p class="tiny pin-error" id="rsError"></p>
+      <div class="pin-actions">
+        <button type="button" class="ghost-btn" id="rsCancel">Cancel</button>
+        <button type="button" class="primary-btn" id="rsPost">Reshare</button>
+      </div>`);
+    const post = back.querySelector("#rsPost");
+    const err = back.querySelector("#rsError");
+    const done = () => {
+      back.remove();
+      onClose?.();
+    };
+    back.querySelector("#rsCancel").onclick = done;
+    back.addEventListener("click", (e) => {
+      if (e.target === back) done();
+    });
+    post.onclick = async () => {
+      post.disabled = true;
+      err.textContent = "";
+      const caption = back.querySelector("#rsCaption").value.trim();
+      let newPath = null,
+        newId = null;
+      try {
+        let mediaPath = null;
+        if (m.kind !== "text") {
+          post.textContent = "Copying…";
+          const { data: sg } = await supabase.storage
+            .from("moments")
+            .createSignedUrl(m.media_path, 300);
+          if (!sg?.signedUrl) throw new Error("Couldn't read the original.");
+          const res = await fetch(sg.signedUrl);
+          if (!res.ok) throw new Error("Couldn't download the original.");
+          const blob = await res.blob();
+          if (blob.size > MOMENT_MAX_VIDEO)
+            throw new Error("That video is over 50 MB.");
+          const isVideo = m.kind === "video";
+          const ext = isVideo
+            ? {
+                "video/webm": "webm",
+                "video/quicktime": "mov",
+                "video/3gpp": "3gp",
+              }[blob.type] || "mp4"
+            : "jpg";
+          newPath = `${currentUser.id}/${crypto.randomUUID()}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("moments")
+            .upload(newPath, blob, {
+              contentType: blob.type || (isVideo ? "video/mp4" : "image/jpeg"),
+            });
+          if (upErr) throw upErr;
+          mediaPath = newPath;
+        }
+        post.textContent = "Sharing…";
+        const row = {
+          user_id: currentUser.id,
+          kind: m.kind,
+          content: m.content || null,
+        };
+        if (m.kind === "text") row.bg = m.bg || MOMENT_BGS[0];
+        else row.media_path = mediaPath;
+        const { data: ins, error: insErr } = await supabase
+          .from("moments")
+          .insert(row)
+          .select("id")
+          .single();
+        if (insErr) throw insErr;
+        newId = ins.id;
+        const { error: rErr } = await supabase.rpc("record_moment_reshare", {
+          p_new_moment_id: newId,
+          p_original_moment_id: m.id,
+          p_caption: caption || null,
+        });
+        if (rErr) throw rErr;
+        toast("Reshared to your moments.");
+        done();
+        loadMoments();
+      } catch (e) {
+        if (newId) await supabase.from("moments").delete().eq("id", newId);
+        if (newPath) supabase.storage.from("moments").remove([newPath]);
+        err.textContent = "Couldn't reshare: " + (e.message || "try again");
+        post.disabled = false;
+        post.textContent = "Reshare";
+      }
+    };
   }
   function openForwardPicker(m, person, onClose) {
     const back = momentModal(`<h3>Forward moment</h3>
@@ -6036,6 +6155,22 @@
       return currentUser;
     },
     toast,
+    ncShow,
+    startConversation,
+    async saveContactName(contactId, name) {
+      const clean = String(name || "")
+        .trim()
+        .slice(0, 40);
+      if (!clean) return;
+      const { error } = await supabase.from("contact_names").upsert({
+        owner_id: currentUser.id,
+        contact_id: contactId,
+        custom_name: clean,
+      });
+      if (error) throw error;
+      contactNames.set(contactId, clean);
+      loadChats();
+    },
   };
 
   init();

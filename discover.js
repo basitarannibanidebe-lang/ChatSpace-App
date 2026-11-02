@@ -7,9 +7,48 @@
   const app = () => window.ChatSpaceApp;
   const toast = (m) => app()?.toast(m);
   const esc = (s) =>
-    String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    String(s).replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
 
-  const COUNTRY_CODES = { NG: "234", GH: "233", KE: "254", ZA: "27", UG: "256", TZ: "255", CM: "237", SN: "221", CI: "225", US: "1", CA: "1", GB: "44", IE: "353", IN: "91", PK: "92", BD: "880", AE: "971", SA: "966", DE: "49", FR: "33", ES: "34", IT: "39", BR: "55", MX: "52", PH: "63", ID: "62", AU: "61", EG: "20" };
+  const COUNTRY_CODES = {
+    NG: "234",
+    GH: "233",
+    KE: "254",
+    ZA: "27",
+    UG: "256",
+    TZ: "255",
+    CM: "237",
+    SN: "221",
+    CI: "225",
+    US: "1",
+    CA: "1",
+    GB: "44",
+    IE: "353",
+    IN: "91",
+    PK: "92",
+    BD: "880",
+    AE: "971",
+    SA: "966",
+    DE: "49",
+    FR: "33",
+    ES: "34",
+    IT: "39",
+    BR: "55",
+    MX: "52",
+    PH: "63",
+    ID: "62",
+    AU: "61",
+    EG: "20",
+  };
   const guessCountryCode = () => {
     const region = (navigator.language || "").split("-")[1]?.toUpperCase();
     return COUNTRY_CODES[region] || "234";
@@ -51,7 +90,8 @@
         if (!m) continue;
         const key = m[1].toUpperCase();
         if (key === "FN") name = m[3].trim();
-        else if (key === "N" && !name) name = m[3].split(";").filter(Boolean).reverse().join(" ").trim();
+        else if (key === "N" && !name)
+          name = m[3].split(";").filter(Boolean).reverse().join(" ").trim();
         else if (key === "TEL") tels.push(m[3].trim());
       }
       if (tels.length) people.push({ name, tel: tels });
@@ -63,9 +103,12 @@
   const rpc = async (fn, args) => {
     const { data, error } = await app().supabase.rpc(fn, args);
     if (error) {
-      const msg = /does not exist|schema cache|Could not find the function/i.test(error.message)
-        ? "Find people isn't set up yet. Run chatspace_batch_f.sql in Supabase."
-        : error.message;
+      const msg =
+        /does not exist|schema cache|Could not find the function/i.test(
+          error.message,
+        )
+          ? "Find people isn't set up yet. Run chatspace_batch_f.sql in Supabase."
+          : error.message;
       throw new Error(msg);
     }
     return data;
@@ -78,7 +121,9 @@
       .eq("user_id", app().user.id)
       .maybeSingle();
     if (error && /does not exist|schema cache/i.test(error.message))
-      throw new Error("Find people isn't set up yet. Run chatspace_batch_f.sql in Supabase.");
+      throw new Error(
+        "Find people isn't set up yet. Run chatspace_batch_f.sql in Supabase.",
+      );
     state.settings = data || { nearby_enabled: false, phone_enabled: false };
     state.loaded = true;
   }
@@ -138,10 +183,19 @@
   function wirePeople(container, people, onSave) {
     container.querySelectorAll(".dc-person").forEach((row) => {
       const p = people.find((x) => x.user_id === row.dataset.id);
-      row.querySelector(".dc-msg").addEventListener("click", () =>
-        app().startConversation({ id: p.user_id, username: p.username, display_name: p.display_name, avatar_url: p.avatar_url }),
-      );
-      row.querySelector(".dc-save")?.addEventListener("click", (e) => onSave?.(p, e.currentTarget));
+      row
+        .querySelector(".dc-msg")
+        .addEventListener("click", () =>
+          app().startConversation({
+            id: p.user_id,
+            username: p.username,
+            display_name: p.display_name,
+            avatar_url: p.avatar_url,
+          }),
+        );
+      row
+        .querySelector(".dc-save")
+        ?.addEventListener("click", (e) => onSave?.(p, e.currentTarget));
     });
   }
 
@@ -194,10 +248,23 @@
 
   const getPosition = () =>
     new Promise((resolve, reject) => {
-      if (!navigator.geolocation) return reject(new Error("This browser can't share a location."));
-      navigator.geolocation.getCurrentPosition(resolve, (err) =>
-        reject(new Error(err.code === 1 ? "Location permission was denied. Allow it in your browser's site settings and try again." : "Couldn't get your location. Try again.")),
-        { enableHighAccuracy: false, timeout: 15000, maximumAge: 10 * 60 * 1000 },
+      if (!navigator.geolocation)
+        return reject(new Error("This browser can't share a location."));
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        (err) =>
+          reject(
+            new Error(
+              err.code === 1
+                ? "Location permission was denied. Allow it in your browser's site settings and try again."
+                : "Couldn't get your location. Try again.",
+            ),
+          ),
+        {
+          enableHighAccuracy: false,
+          timeout: 15000,
+          maximumAge: 10 * 60 * 1000,
+        },
       );
     });
 
@@ -229,17 +296,30 @@
     if (!out) return;
     out.innerHTML = `<p class="muted tiny">Looking…</p>`;
     try {
-      if (refreshLocation) await shareLocation().catch((err) => { if (/denied/i.test(err.message)) throw err; });
+      if (refreshLocation)
+        await shareLocation().catch((err) => {
+          if (/denied/i.test(err.message)) throw err;
+        });
       const people = (await rpc("find_nearby", { max_km: state.radius })) || [];
       if (token !== nearbyToken || !$("dcResults")) return;
       if (!people.length) {
         out.innerHTML = `<p class="dc-empty">No one nearby yet.<br /><small>Only people who turned on "nearby" appear here. Try a wider distance, or invite friends.</small></p>`;
         return;
       }
-      out.innerHTML = people.map((p) => personRow(p, p.distance_km < 3 ? "Less than 3 km away" : `About ${p.distance_km} km away`)).join("");
+      out.innerHTML = people
+        .map((p) =>
+          personRow(
+            p,
+            p.distance_km < 3
+              ? "Less than 3 km away"
+              : `About ${p.distance_km} km away`,
+          ),
+        )
+        .join("");
       wirePeople(out, people);
     } catch (err) {
-      if (token === nearbyToken && $("dcResults")) out.innerHTML = `<p class="dc-error">${esc(err.message)}</p>`;
+      if (token === nearbyToken && $("dcResults"))
+        out.innerHTML = `<p class="dc-error">${esc(err.message)}</p>`;
     }
   }
 
@@ -304,8 +384,10 @@
     const btn = e.currentTarget;
     const cc = ($("dcCc").value || "").replace(/\D/g, "");
     const number = toE164($("dcMyPhone").value, cc);
-    if (!cc) return ($("dcMsg").textContent = "Enter your country code, like 234.");
-    if (!number) return ($("dcMsg").textContent = "That phone number doesn't look right.");
+    if (!cc)
+      return ($("dcMsg").textContent = "Enter your country code, like 234.");
+    if (!number)
+      return ($("dcMsg").textContent = "That phone number doesn't look right.");
     state.cc = cc;
     localStorage.setItem("chatspace-cc", cc);
     setBusy(btn, true, "Turning on…");
@@ -338,10 +420,19 @@
     try {
       const rows = [];
       for (let i = 0; i < numbers.length; i += 400)
-        rows.push(...((await rpc("match_phone_contacts", { numbers: numbers.slice(i, i + 400) })) || []));
+        rows.push(
+          ...((await rpc("match_phone_contacts", {
+            numbers: numbers.slice(i, i + 400),
+          })) || []),
+        );
       // One row per person, with the name from your contacts.
       const byUser = new Map();
-      for (const r of rows) if (!byUser.has(r.user_id)) byUser.set(r.user_id, { ...r, contactName: names.get(r.matched_number) || "" });
+      for (const r of rows)
+        if (!byUser.has(r.user_id))
+          byUser.set(r.user_id, {
+            ...r,
+            contactName: names.get(r.matched_number) || "",
+          });
       const people = [...byUser.values()];
       if (!people.length) {
         out.innerHTML = `<p class="dc-empty">None of these ${numbers.length} numbers are on ChatSpace yet.<br /><small>Invite them with your profile link.</small></p>`;
@@ -353,8 +444,12 @@
           .map((p) =>
             personRow(
               { ...p, display_name: p.contactName || p.display_name },
-              p.contactName ? `in your contacts as “${p.contactName}”` : "in your contacts",
-              p.contactName && p.contactName !== (p.display_name || p.username) ? `<button type="button" class="ghost-btn dc-save">Save name</button>` : "",
+              p.contactName
+                ? `in your contacts as “${p.contactName}”`
+                : "in your contacts",
+              p.contactName && p.contactName !== (p.display_name || p.username)
+                ? `<button type="button" class="ghost-btn dc-save">Save name</button>`
+                : "",
             ),
           )
           .join("");
@@ -375,26 +470,41 @@
 
   async function pickContacts() {
     try {
-      const picked = await navigator.contacts.select(["name", "tel"], { multiple: true });
+      const picked = await navigator.contacts.select(["name", "tel"], {
+        multiple: true,
+      });
       if (!picked.length) return;
-      await matchContacts(picked.map((c) => ({ name: (c.name || [])[0] || "", tel: c.tel || [] })));
+      await matchContacts(
+        picked.map((c) => ({
+          name: (c.name || [])[0] || "",
+          tel: c.tel || [],
+        })),
+      );
     } catch (err) {
-      if (err?.name !== "AbortError") $("dcMsg").textContent = "Couldn't open your contacts.";
+      if (err?.name !== "AbortError")
+        $("dcMsg").textContent = "Couldn't open your contacts.";
     }
   }
   async function importVcf(e) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) return ($("dcMsg").textContent = "That file is too big.");
+    if (file.size > 5 * 1024 * 1024)
+      return ($("dcMsg").textContent = "That file is too big.");
     const people = parseVcf(await file.text());
-    if (!people.length) return ($("dcMsg").textContent = "No contacts with phone numbers were found in that file.");
+    if (!people.length)
+      return ($("dcMsg").textContent =
+        "No contacts with phone numbers were found in that file.");
     $("dcMsg").textContent = "";
     await matchContacts(people);
   }
   async function checkTyped() {
-    const lines = $("dcNumbers").value.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
-    if (!lines.length) return ($("dcMsg").textContent = "Type at least one number.");
+    const lines = $("dcNumbers")
+      .value.split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!lines.length)
+      return ($("dcMsg").textContent = "Type at least one number.");
     $("dcMsg").textContent = "";
     await matchContacts(lines.map((t) => ({ name: "", tel: [t] })));
   }

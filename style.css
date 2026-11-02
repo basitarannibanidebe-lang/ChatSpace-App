@@ -5032,3 +5032,33 @@ button.mf-row:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Moments: reshare */
+.mv-reshare {
+  position: absolute;
+  top: calc(104px + env(safe-area-inset-top, 0px));
+  left: 14px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 12px;
+}
+.mv-recap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 150px;
+  z-index: 3;
+  padding: 8px 20px;
+  color: #fff;
+  text-align: center;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.moment-reshare-note {
+  margin: 0;
+}
