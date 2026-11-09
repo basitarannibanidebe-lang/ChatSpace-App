@@ -29,16 +29,17 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./style.css?v=20" />
-    <link rel="stylesheet" href="./ai.css?v=20" />
-    <link rel="stylesheet" href="./discover.css?v=20" />
+    <link rel="stylesheet" href="./style.css?v=21" />
+    <link rel="stylesheet" href="./ai.css?v=21" />
+    <link rel="stylesheet" href="./discover.css?v=21" />
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="./config.js?v=20"></script>
-    <script src="./enhance.js?v=20" defer></script>
-    <script src="./ai.js?v=20" defer></script>
-    <script src="./groupcall.js?v=20" defer></script>
-    <script src="./app.js?v=20" defer></script>
-    <script src="./discover.js?v=20" defer></script>
+    <script src="./config.js?v=21"></script>
+    <script src="./icons.js?v=21" defer></script>
+    <script src="./enhance.js?v=21" defer></script>
+    <script src="./ai.js?v=21" defer></script>
+    <script src="./groupcall.js?v=21" defer></script>
+    <script src="./app.js?v=21" defer></script>
+    <script src="./discover.js?v=21" defer></script>
     <style>
       #netlify-badge,
       [data-netlify-badge],
@@ -316,7 +317,9 @@
                   <path d="M22 8l-6 4 6 4z" />
                 </svg></button
             ></span>
-            <span class="secure-label">● Private chat</span>
+            <span class="secure-label"
+              ><span data-icon="lock" data-size="13"></span> Private chat</span
+            >
           </div>
         </header>
         <div id="welcomePanel" class="welcome-panel">
@@ -329,7 +332,7 @@
           <p>Search for a username on the left, or choose an existing chat.</p>
 
           <div class="support-card">
-            <h3>💬 Need help?</h3>
+            <h3>Need help?</h3>
             <p>
               Having a problem or want us to add a new feature? Contact
               <a href="#" id="supportLink">@cyber-ace</a>
@@ -354,7 +357,7 @@
               aria-label="Cancel reply"
               title="Cancel reply"
             >
-              &times;
+              <span data-icon="x" data-size="18"></span>
             </button>
           </div>
 
@@ -364,8 +367,8 @@
 
           <div class="composer-row">
             <label class="attach-btn" title="Attach a file" for="fileInput"
-              >＋</label
-            >
+              ><span data-icon="paperclip" data-size="20"></span
+            ></label>
 
             <input
               id="fileInput"
@@ -427,7 +430,7 @@
               title="GIFs and stickers"
               aria-label="GIFs and stickers"
             >
-              GIF
+              <span data-icon="smile" data-size="22"></span>
             </button>
 
             <button
@@ -455,11 +458,11 @@
             </button>
 
             <button id="sendBtn" class="send-btn" aria-label="Send message">
-              ➤
+              <span data-icon="send" data-size="20"></span>
             </button>
           </div>
 
-          <p class="composer-hint">
+          <p class="composer-hint" id="composerHint">
             Enter to send · Shift + Enter for a new line · Attachments up to 50
             MB
           </p>
@@ -544,7 +547,8 @@
             </button>
           </div>
           <button id="whatsNewBtn" class="ghost-btn full" type="button">
-            ✨ What's new in ChatSpace
+            <span data-icon="sparkles" data-size="18"></span> What's new in
+            ChatSpace
           </button>
           <h3 class="setting-title">Interface size</h3>
           <label class="setting-row" for="textScaleInput"
@@ -565,8 +569,18 @@
             value="100"
           />
           <button id="fullscreenBtn" class="ghost-btn full" type="button">
-            ⛶ Toggle full screen
+            <span data-icon="expand" data-size="18"></span> Toggle full screen
           </button>
+          <h3 class="setting-title">Messaging</h3>
+          <label class="setting-row" for="enterSendsToggle">
+            <span
+              ><strong>Press Enter to send</strong><br /><small class="muted"
+                >When off, Enter starts a new line and you send with the send
+                button or Ctrl/⌘ + Enter.</small
+              ></span
+            >
+            <input id="enterSendsToggle" type="checkbox" checked />
+          </label>
           <h3 class="setting-title">Privacy</h3>
           <label class="setting-row" for="receiptsToggle">
             <span
@@ -635,7 +649,7 @@
       <section id="peerProfilePanel" class="profile-panel hidden">
         <div class="profile-card">
           <button id="peerProfileBack" class="ghost-btn" type="button">
-            ← Back to chat
+            <span data-icon="back" data-size="18"></span> Back to chat
           </button>
           <div class="avatar-edit">
             <div
@@ -699,7 +713,9 @@
             </button>
           </div>
           <div id="ncPersonStep" class="hidden">
-            <button class="ghost-btn nc-back" type="button">← Back</button>
+            <button class="ghost-btn nc-back" type="button">
+              <span data-icon="back" data-size="18"></span> Back
+            </button>
             <div class="search-wrap">
               <span>⌕</span
               ><input
@@ -711,11 +727,15 @@
             <div id="searchResults" class="search-results"></div>
           </div>
           <div id="ncDiscoverStep" class="hidden">
-            <button class="ghost-btn nc-back" type="button">← Back</button>
+            <button class="ghost-btn nc-back" type="button">
+              <span data-icon="back" data-size="18"></span> Back
+            </button>
             <div id="discoverRoot"></div>
           </div>
           <div id="ncGroupStep" class="hidden">
-            <button class="ghost-btn nc-back" type="button">← Back</button>
+            <button class="ghost-btn nc-back" type="button">
+              <span data-icon="back" data-size="18"></span> Back
+            </button>
             <label for="groupNameInput">Group name</label>
             <input
               id="groupNameInput"
@@ -739,7 +759,7 @@
       <section id="groupPanel" class="profile-panel hidden">
         <div class="profile-card">
           <button id="groupBack" class="ghost-btn" type="button">
-            ← Back to chat
+            <span data-icon="back" data-size="18"></span> Back to chat
           </button>
           <div class="avatar-edit">
             <div id="groupAvatar" class="user-avatar xl">?</div>

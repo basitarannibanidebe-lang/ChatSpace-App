@@ -7,7 +7,17 @@
   const app = () => window.ChatSpaceApp;
   const toast = (m) => app()?.toast(m);
   const esc = (s) =>
-    String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    String(s).replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
   const el = (html) => {
     const t = document.createElement("template");
     t.innerHTML = html.trim();
@@ -55,7 +65,8 @@
     return String(text)
       .split("```")
       .map((part, i) => {
-        if (i % 2) return `<pre><code>${esc(part.replace(/^\w*\n/, ""))}</code></pre>`;
+        if (i % 2)
+          return `<pre><code>${esc(part.replace(/^\w*\n/, ""))}</code></pre>`;
         let out = "",
           list = null;
         const close = () => {
@@ -67,7 +78,10 @@
             .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
             .replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g, "$1<em>$2</em>")
             .replace(/`([^`]+)`/g, "<code>$1</code>")
-            .replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+            .replace(
+              /(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g,
+              '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+            );
           const ul = /^\s*[-*•]\s+(.*)$/.exec(line);
           const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
           if (ul || ol) {
@@ -92,9 +106,10 @@
   /* ---------- panel ---------- */
   function build() {
     if ($("aiPanel")) return $("aiPanel");
-    const panel = el(`<section id="aiPanel" class="ai-panel hidden" role="dialog" aria-label="ChatSpace AI">
+    const panel =
+      el(`<section id="aiPanel" class="ai-panel hidden" role="dialog" aria-label="ChatSpace AI">
       <header class="ai-head">
-        <button type="button" class="ai-back" id="aiBack" aria-label="Back">‹</button>
+        <button type="button" class="ai-back" id="aiBack" aria-label="Back">${CSIcons.icon("back", 20)}</button>
         <div class="ai-avatar" aria-hidden="true">✨</div>
         <div class="ai-title"><strong>ChatSpace AI</strong><small>Ask about the app or anything else</small></div>
         <button type="button" class="ghost-btn ai-clear" id="aiClear">Clear</button>
@@ -104,11 +119,11 @@
         <div id="aiAttachments" class="ai-attachments hidden"></div>
         <div id="aiRecBar" class="ai-recbar hidden"><span class="ai-rec-dot"></span><span id="aiRecTime">0:00</span><span class="ai-rec-hint">Recording…</span><button type="button" class="ghost-btn" id="aiRecCancel">Cancel</button></div>
         <div class="ai-row">
-          <button type="button" class="ai-icon-btn" id="aiAttach" title="Attach a photo or file" aria-label="Attach a photo or file">＋</button>
+          <button type="button" class="ai-icon-btn" id="aiAttach" title="Attach a photo or file" aria-label="Attach a photo or file">${CSIcons.icon("paperclip", 20)}</button>
           <input id="aiFile" type="file" hidden multiple accept="${ACCEPT}" />
           <textarea id="aiInput" rows="1" placeholder="Ask ChatSpace AI…" aria-label="Message ChatSpace AI" enterkeyhint="send"></textarea>
-          <button type="button" class="ai-icon-btn" id="aiMic" title="Record a voice note" aria-label="Record a voice note">🎙</button>
-          <button type="button" class="ai-send" id="aiSend" aria-label="Send">➤</button>
+          <button type="button" class="ai-icon-btn" id="aiMic" title="Record a voice note" aria-label="Record a voice note">${CSIcons.icon("mic", 20)}</button>
+          <button type="button" class="ai-send" id="aiSend" aria-label="Send">${CSIcons.icon("send", 18)}</button>
         </div>
         <p class="ai-hint">AI can make mistakes. Don't share passwords or private details.</p>
       </div>
@@ -116,7 +131,10 @@
     document.body.appendChild(panel);
     $("aiBack").addEventListener("click", close);
     $("aiClear").addEventListener("click", () => {
-      if (!state.messages.length || confirm("Clear this conversation with ChatSpace AI?")) {
+      if (
+        !state.messages.length ||
+        confirm("Clear this conversation with ChatSpace AI?")
+      ) {
         state.messages = [];
         save();
         render();
@@ -129,7 +147,12 @@
     });
     input.addEventListener("keydown", (e) => {
       // Enter sends on computers; on phones Enter makes a new line.
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      if (
+        e.key === "Enter" &&
+        !e.shiftKey &&
+        !e.isComposing &&
+        matchMedia("(hover: hover) and (pointer: fine)").matches
+      ) {
         e.preventDefault();
         send();
       }
@@ -149,8 +172,10 @@
     const box = $("aiMessages");
     if (!box) return;
     if (!state.messages.length && !state.busy) {
-      box.innerHTML = `<div class="ai-welcome"><div class="ai-orb">✨</div><h3>Hi, I'm ChatSpace AI</h3><p>I can show you around the app and answer other questions too. Send text, photos, PDFs or a voice note.</p><div class="ai-chips">${SUGGESTIONS.map((s) => `<button type="button" class="ai-chip">${esc(s)}</button>`).join("")}</div></div>`;
-      box.querySelectorAll(".ai-chip").forEach((b) => b.addEventListener("click", () => send(b.textContent)));
+      box.innerHTML = `<div class="ai-welcome"><div class="ai-orb">${CSIcons.icon("sparkles", 26)}</div><h3>Hi, I'm ChatSpace AI</h3><p>I can show you around the app and answer other questions too. Send text, photos, PDFs or a voice note.</p><div class="ai-chips">${SUGGESTIONS.map((s) => `<button type="button" class="ai-chip">${esc(s)}</button>`).join("")}</div></div>`;
+      box
+        .querySelectorAll(".ai-chip")
+        .forEach((b) => b.addEventListener("click", () => send(b.textContent)));
       return;
     }
     box.innerHTML =
@@ -161,7 +186,9 @@
           return `<div class="ai-msg bot${m.error ? " error" : ""}"><div class="ai-bubble">${m.error ? esc(m.content) : md(m.content)}</div></div>`;
         })
         .join("") +
-      (state.busy ? `<div class="ai-msg bot"><div class="ai-bubble typing" aria-label="ChatSpace AI is typing"><i></i><i></i><i></i></div></div>` : "");
+      (state.busy
+        ? `<div class="ai-msg bot"><div class="ai-bubble typing" aria-label="ChatSpace AI is typing"><i></i><i></i><i></i></div></div>`
+        : "");
     box.scrollTop = box.scrollHeight;
   }
 
@@ -193,16 +220,22 @@
   async function shrink(file) {
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
     try {
-      const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+      const bmp = await createImageBitmap(file, {
+        imageOrientation: "from-image",
+      });
       const scale = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(bmp.width * scale));
       canvas.height = Math.max(1, Math.round(bmp.height * scale));
       canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
       bmp.close?.();
-      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+      const blob = await new Promise((r) =>
+        canvas.toBlob(r, "image/jpeg", 0.85),
+      );
       return blob && blob.size < file.size
-        ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" })
+        ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", {
+            type: "image/jpeg",
+          })
         : file;
     } catch {
       return file;
@@ -222,7 +255,9 @@
     return f.type;
   };
   const supported = (m) =>
-    /^(image\/(jpeg|png|webp|gif)|application\/pdf|text\/|application\/json|application\/vnd\.openxmlformats-officedocument\.)/.test(m);
+    /^(image\/(jpeg|png|webp|gif)|application\/pdf|text\/|application\/json|application\/vnd\.openxmlformats-officedocument\.)/.test(
+      m,
+    );
 
   async function onFiles(e) {
     const files = [...(e.target.files || [])];
@@ -233,7 +268,9 @@
         break;
       }
       if (!supported(mimeOf(f))) {
-        toast(`${f.name}: I can read photos, PDFs, Office files and text files.`);
+        toast(
+          `${f.name}: I can read photos, PDFs, Office files and text files.`,
+        );
         continue;
       }
       const prepared = await shrink(f);
@@ -249,7 +286,10 @@
     const box = $("aiAttachments");
     box.classList.toggle("hidden", !state.pending.length);
     box.innerHTML = state.pending
-      .map((f, i) => `<span class="ai-file">${f.type.startsWith("image/") ? "🖼" : "📄"} <span class="ai-file-name">${esc(f.name)}</span><button type="button" data-i="${i}" aria-label="Remove ${esc(f.name)}">&times;</button></span>`)
+      .map(
+        (f, i) =>
+          `<span class="ai-file">${f.type.startsWith("image/") ? "🖼" : "📄"} <span class="ai-file-name">${esc(f.name)}</span><button type="button" data-i="${i}" aria-label="Remove ${esc(f.name)}">${CSIcons.icon("x", 12)}</button></span>`,
+      )
       .join("");
     box.querySelectorAll("button").forEach((b) =>
       b.addEventListener("click", () => {
@@ -260,7 +300,8 @@
   }
 
   /* ---------- voice notes ---------- */
-  const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const fmtTime = (s) =>
+    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   async function toggleRecording() {
     if (state.busy) return;
     if (state.rec) return stopRecording(false);
@@ -270,7 +311,14 @@
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks = [];
       const recorder = new MediaRecorder(stream);
-      const rec = { recorder, stream, chunks, started: Date.now(), cancelled: false, timer: null };
+      const rec = {
+        recorder,
+        stream,
+        chunks,
+        started: Date.now(),
+        cancelled: false,
+        timer: null,
+      };
       state.rec = rec;
       recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       recorder.onstop = () => {
@@ -281,8 +329,11 @@
         $("aiMic").classList.remove("recording");
         if (rec.cancelled) return;
         const secs = Math.round((Date.now() - rec.started) / 1000);
-        if (secs < 1) return toast("That was too short. Hold on a little longer.");
-        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (secs < 1)
+          return toast("That was too short. Hold on a little longer.");
+        const blob = new Blob(chunks, {
+          type: recorder.mimeType || "audio/webm",
+        });
         send("", { blob, secs });
       };
       recorder.start();
@@ -314,12 +365,15 @@
     const text = (prefill || input.value).trim();
     const files = voice ? [] : state.pending.slice();
     if (!text && !files.length && !voice) return;
-    if (!navigator.onLine) return toast("You're offline. The AI needs an internet connection.");
+    if (!navigator.onLine)
+      return toast("You're offline. The AI needs an internet connection.");
 
     const userMsg = {
       role: "user",
       content: text,
-      label: voice ? `🎙 Voice note · ${fmtTime(voice.secs)}` : files.map((f) => f.name).join(", "),
+      label: voice
+        ? `🎙 Voice note · ${fmtTime(voice.secs)}`
+        : files.map((f) => f.name).join(", "),
     };
     state.messages.push(userMsg);
     input.value = "";
@@ -334,21 +388,35 @@
       const token = data?.session?.access_token;
       if (!token) throw new Error("Please log in again.");
 
-      const history = state.messages.slice(-13, -1).filter((m) => !m.error).map((m) => ({
-        role: m.role,
-        content: m.content || (m.label ? `(${m.label})` : ""),
-      }));
+      const history = state.messages
+        .slice(-13, -1)
+        .filter((m) => !m.error)
+        .map((m) => ({
+          role: m.role,
+          content: m.content || (m.label ? `(${m.label})` : ""),
+        }));
       history.push({ role: "user", content: text });
       const body = { messages: history };
-      if (voice) body.audio = { mime: voice.blob.type || "audio/webm", data: await toB64(voice.blob) };
+      if (voice)
+        body.audio = {
+          mime: voice.blob.type || "audio/webm",
+          data: await toB64(voice.blob),
+        };
       if (files.length)
         body.attachments = await Promise.all(
-          files.map(async (f) => ({ name: f.name, mime: mimeOf(f), data: await toB64(f) })),
+          files.map(async (f) => ({
+            name: f.name,
+            mime: mimeOf(f),
+            data: await toB64(f),
+          })),
         );
 
       const res = await fetch("/api/ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + token,
+        },
         body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);
@@ -378,8 +446,10 @@
   /* ---------- entry points ---------- */
   // Called by app.js each time a chat list is drawn: adds ChatSpace AI as the first row.
   function decorateList(list) {
-    if (!list || list.id !== "chatList" || list.querySelector(".ai-entry")) return;
-    const entry = el(`<div class="chat-item ai-entry" role="button" tabindex="0">
+    if (!list || list.id !== "chatList" || list.querySelector(".ai-entry"))
+      return;
+    const entry =
+      el(`<div class="chat-item ai-entry" role="button" tabindex="0">
       <span class="user-avatar ai-avatar">✨</span>
       <span class="chat-item-details"><strong>ChatSpace AI <span class="ai-tag">AI</span></strong><small>Ask about the app or anything else</small></span>
     </div>`);
@@ -396,7 +466,9 @@
   function addWelcomeCard() {
     const panel = $("welcomePanel");
     if (!panel || panel.querySelector(".ai-card")) return;
-    const card = el(`<button type="button" class="ai-card"><span class="ai-orb sm">✨</span><span><strong>Ask ChatSpace AI</strong><small>Get help with the app, or ask anything</small></span></button>`);
+    const card = el(
+      `<button type="button" class="ai-card"><span class="ai-orb sm">${CSIcons.icon("sparkles", 18)}</span><span><strong>Ask ChatSpace AI</strong><small>Get help with the app, or ask anything</small></span></button>`,
+    );
     card.addEventListener("click", open);
     const anchor = panel.querySelector(".support-card");
     anchor ? anchor.before(card) : panel.appendChild(card);

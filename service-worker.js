@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v21-newicon";
+const CACHE_NAME = "chatspace-v22-iconset";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -8,6 +8,7 @@ const APP_FILES = [
   "/enhance.js",
   "/ai.js",
   "/ai.css",
+  "/icons.js",
   "/discover.js",
   "/discover.css",
   "/manifest.json",

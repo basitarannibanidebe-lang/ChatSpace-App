@@ -166,9 +166,9 @@
     const box = root();
     box.innerHTML = `
       <div class="dc-tabs three" role="tablist">
-        <button type="button" role="tab" class="dc-tab" data-tab="nearby" aria-selected="${state.tab === "nearby"}">📍 Nearby</button>
-        <button type="button" role="tab" class="dc-tab" data-tab="map" aria-selected="${state.tab === "map"}">🗺 Map</button>
-        <button type="button" role="tab" class="dc-tab" data-tab="contacts" aria-selected="${state.tab === "contacts"}">👥 Contacts</button>
+        <button type="button" role="tab" class="dc-tab" data-tab="nearby" aria-selected="${state.tab === "nearby"}">${CSIcons.icon("pin", 16)} Nearby</button>
+        <button type="button" role="tab" class="dc-tab" data-tab="map" aria-selected="${state.tab === "map"}">${CSIcons.icon("map", 16)} Map</button>
+        <button type="button" role="tab" class="dc-tab" data-tab="contacts" aria-selected="${state.tab === "contacts"}">${CSIcons.icon("users", 16)} Contacts</button>
       </div>
       <div id="dcBody"></div>`;
     box.querySelectorAll(".dc-tab").forEach((b) =>
@@ -192,16 +192,14 @@
   function wirePeople(container, people, onSave) {
     container.querySelectorAll(".dc-person").forEach((row) => {
       const p = people.find((x) => x.user_id === row.dataset.id);
-      row
-        .querySelector(".dc-msg")
-        .addEventListener("click", () =>
-          app().startConversation({
-            id: p.user_id,
-            username: p.username,
-            display_name: p.display_name,
-            avatar_url: p.avatar_url,
-          }),
-        );
+      row.querySelector(".dc-msg").addEventListener("click", () =>
+        app().startConversation({
+          id: p.user_id,
+          username: p.username,
+          display_name: p.display_name,
+          avatar_url: p.avatar_url,
+        }),
+      );
       row
         .querySelector(".dc-save")
         ?.addEventListener("click", (e) => onSave?.(p, e.currentTarget));
@@ -442,10 +440,10 @@
         <select id="dcRadius">${[5, 25, 100].map((k) => `<option value="${k}" ${k === state.radius ? "selected" : ""}>${k} km</option>`).join("")}</select>
         <button type="button" class="ghost-btn" id="dcRefresh">Refresh</button>
       </div>
-      <div id="dcMap" class="dc-map"><button type="button" class="dc-map-close" id="dcMapClose" aria-label="Close full screen map">✕</button></div>
+      <div id="dcMap" class="dc-map"><button type="button" class="dc-map-close" id="dcMapClose" aria-label="Close full screen map">${CSIcons.icon("x", 20)}</button></div>
       <div class="dc-map-tools">
-        <button type="button" class="ghost-btn" id="dcMapFull">⤢ Full screen</button>
-        <button type="button" class="ghost-btn" id="dcMapMe">📍 Center on me</button>
+        <button type="button" class="ghost-btn" id="dcMapFull">${CSIcons.icon("expand", 16)} Full screen</button>
+        <button type="button" class="ghost-btn" id="dcMapMe">${CSIcons.icon("locate", 16)} Center on me</button>
         <button type="button" class="ghost-btn" id="dcMapAll">Show everyone</button>
       </div>
       <p id="dcMapNote" class="muted tiny" role="status">Looking…</p>

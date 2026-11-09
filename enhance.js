@@ -4,7 +4,9 @@
 (() => {
   const MB = 1024 * 1024;
   const fmtSize = (n) =>
-    n >= MB ? (n / MB).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+    n >= MB
+      ? (n / MB).toFixed(1) + " MB"
+      : Math.max(1, Math.round(n / 1024)) + " KB";
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
   // Which files the editor can handle (animated GIFs and SVGs are sent untouched).
@@ -15,7 +17,9 @@
   async function decode(file) {
     if (window.createImageBitmap) {
       try {
-        return await createImageBitmap(file, { imageOrientation: "from-image" });
+        return await createImageBitmap(file, {
+          imageOrientation: "from-image",
+        });
       } catch (_) {}
     }
     const url = URL.createObjectURL(file);
@@ -33,7 +37,9 @@
   function levelsOf(data) {
     const hist = new Uint32Array(256);
     for (let i = 0; i < data.length; i += 4)
-      hist[(0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) | 0]++;
+      hist[
+        (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) | 0
+      ]++;
     const total = data.length / 4;
     let acc = 0,
       lo = 0,
@@ -110,7 +116,11 @@
           for (let k = 0; k < 3; k++) {
             const v =
               src[p + k] * (1 + 4 * a) -
-              a * (src[p - 4 + k] + src[p + 4 + k] + src[p - row + k] + src[p + row + k]);
+              a *
+                (src[p - 4 + k] +
+                  src[p + 4 + k] +
+                  src[p - row + k] +
+                  src[p + row + k]);
             d[p + k] = v < 0 ? 0 : v > 255 ? 255 : v;
           }
         }
@@ -139,9 +149,24 @@
   }
 
   const QUALITY = {
-    original: { label: "Original", edge: 6000, q: 0.95, note: "Full size, nothing shrunk" },
-    hd: { label: "HD", edge: 2560, q: 0.9, note: "Sharp on any phone, a good size" },
-    saver: { label: "Data saver", edge: 1280, q: 0.72, note: "Smallest, loads fast" },
+    original: {
+      label: "Original",
+      edge: 6000,
+      q: 0.95,
+      note: "Full size, nothing shrunk",
+    },
+    hd: {
+      label: "HD",
+      edge: 2560,
+      q: 0.9,
+      note: "Sharp on any phone, a good size",
+    },
+    saver: {
+      label: "Data saver",
+      edge: 1280,
+      q: 0.72,
+      note: "Smallest, loads fast",
+    },
   };
 
   function open(file) {
@@ -155,7 +180,15 @@
       }
       const natW = bitmap.width || bitmap.naturalWidth,
         natH = bitmap.height || bitmap.naturalHeight;
-      const state = { auto: false, brightness: 0, contrast: 0, saturation: 0, sharpness: 0, rotate: 0, quality: "hd" };
+      const state = {
+        auto: false,
+        brightness: 0,
+        contrast: 0,
+        saturation: 0,
+        sharpness: 0,
+        rotate: 0,
+        quality: "hd",
+      };
       let levels = { lo: 0, hi: 255 };
       let baseCanvas = null,
         baseData = null,
@@ -176,8 +209,8 @@
         <div class="enh-panel">
           <p class="enh-info tiny muted"></p>
           <div class="enh-row">
-            <button type="button" class="enh-chip" data-act="auto" aria-pressed="false">✨ Auto-enhance</button>
-            <button type="button" class="enh-chip" data-act="rotate">⟳ Rotate</button>
+            <button type="button" class="enh-chip" data-act="auto" aria-pressed="false">${CSIcons.icon("sparkles", 14)} Auto-enhance</button>
+            <button type="button" class="enh-chip" data-act="rotate">${CSIcons.icon("repost", 14)} Rotate</button>
             <button type="button" class="enh-chip" data-act="reset">Reset</button>
           </div>
           <div class="enh-seg" role="group" aria-label="Quality"></div>
@@ -201,7 +234,12 @@
       };
 
       const edited = () =>
-        state.auto || state.brightness || state.contrast || state.saturation || state.sharpness || state.rotate;
+        state.auto ||
+        state.brightness ||
+        state.contrast ||
+        state.saturation ||
+        state.sharpness ||
+        state.rotate;
 
       function refreshInfo() {
         const q = QUALITY[state.quality];
@@ -217,8 +255,12 @@
               `<button type="button" class="enh-segbtn${key === state.quality ? " on" : ""}" data-q="${key}">${v.label}</button>`,
           )
           .join("");
-        root.querySelector('[data-act="auto"]').setAttribute("aria-pressed", String(state.auto));
-        root.querySelector('[data-act="auto"]').classList.toggle("on", state.auto);
+        root
+          .querySelector('[data-act="auto"]')
+          .setAttribute("aria-pressed", String(state.auto));
+        root
+          .querySelector('[data-act="auto"]')
+          .classList.toggle("on", state.auto);
       }
 
       function rebuildBase() {
@@ -235,7 +277,11 @@
         }
         busy = true;
         requestAnimationFrame(() => {
-          const copy = new ImageData(new Uint8ClampedArray(baseData.data), baseData.width, baseData.height);
+          const copy = new ImageData(
+            new Uint8ClampedArray(baseData.data),
+            baseData.width,
+            baseData.height,
+          );
           adjust(copy, state, levels);
           canvas.width = copy.width;
           canvas.height = copy.height;
@@ -291,10 +337,18 @@
           paint();
         }
         if (act === "reset") {
-          Object.assign(state, { auto: false, brightness: 0, contrast: 0, saturation: 0, sharpness: 0 });
+          Object.assign(state, {
+            auto: false,
+            brightness: 0,
+            contrast: 0,
+            saturation: 0,
+            sharpness: 0,
+          });
           const turned = state.rotate !== 0;
           state.rotate = 0;
-          root.querySelectorAll("input[type=range]").forEach((r) => (r.value = 0));
+          root
+            .querySelectorAll("input[type=range]")
+            .forEach((r) => (r.value = 0));
           if (turned) rebuildBase();
           refreshInfo();
           paint();
@@ -316,13 +370,11 @@
         state[key] = Number(e.target.value);
         paint();
       });
-      document.addEventListener(
-        "keydown",
-        function esc(e) {
-          if (!root.isConnected) return document.removeEventListener("keydown", esc);
-          if (e.key === "Escape") finish(null);
-        },
-      );
+      document.addEventListener("keydown", function esc(e) {
+        if (!root.isConnected)
+          return document.removeEventListener("keydown", esc);
+        if (e.key === "Escape") finish(null);
+      });
 
       rebuildBase();
       refreshInfo();

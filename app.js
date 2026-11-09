@@ -1509,7 +1509,7 @@
 
     pickerButton.type = "button";
     pickerButton.className = "reaction-picker-trigger";
-    pickerButton.textContent = "＋";
+    pickerButton.innerHTML = CSIcons.icon("plus", 16);
     pickerButton.title = "Add a reaction";
     pickerButton.setAttribute("aria-label", "Add a reaction");
     pickerButton.setAttribute("aria-expanded", "false");
@@ -1912,7 +1912,7 @@
     const replyButton = document.createElement("button");
     replyButton.type = "button";
     replyButton.className = "message-reply-btn";
-    replyButton.textContent = "↩ Reply";
+    replyButton.innerHTML = CSIcons.icon("reply", 15) + "<span>Reply</span>";
     replyButton.setAttribute("aria-label", "Reply to this message");
 
     replyButton.addEventListener("click", () => {
@@ -1926,7 +1926,7 @@
       const editButton = document.createElement("button");
       editButton.type = "button";
       editButton.className = "message-edit-btn";
-      editButton.textContent = "✏️ Edit";
+      editButton.innerHTML = CSIcons.icon("edit", 15) + "<span>Edit</span>";
 
       editButton.addEventListener("click", () => {
         startEditMessage(msg);
@@ -1938,7 +1938,8 @@
       const deleteButton = document.createElement("button");
 
       deleteButton.className = "message-delete-btn";
-      deleteButton.textContent = "Delete";
+      deleteButton.innerHTML =
+        CSIcons.icon("trash", 15) + "<span>Delete</span>";
 
       deleteButton.addEventListener("click", () => {
         deleteMessage(msg);
@@ -1949,7 +1950,8 @@
     const hideButton = document.createElement("button");
 
     hideButton.className = "message-hide-btn";
-    hideButton.textContent = "Delete for me";
+    hideButton.innerHTML =
+      CSIcons.icon("trash", 15) + "<span>Delete for me</span>";
 
     hideButton.addEventListener("click", () => {
       hideMessageForMe(msg);
@@ -2612,10 +2614,10 @@
       </div>
       <video id="localVideo" class="call-local ${call.media === "video" ? "" : "hidden"}" autoplay playsinline muted></video>
       <div class="call-controls">
-        <button type="button" id="callMute" class="call-btn" aria-label="Mute microphone">🎤</button>
-        <button type="button" id="callCam" class="call-btn ${call.media === "video" ? "" : "hidden"}" aria-label="Turn camera off">📷</button>
-        <button type="button" id="callAdd" class="call-btn" aria-label="Add someone to this call" title="Add someone">＋</button>
-        <button type="button" id="callEnd" class="call-btn end" aria-label="End call">✕</button>
+        <button type="button" id="callMute" class="call-btn" aria-label="Mute microphone">${CSIcons.icon("mic", 24)}</button>
+        <button type="button" id="callCam" class="call-btn ${call.media === "video" ? "" : "hidden"}" aria-label="Turn camera off">${CSIcons.icon("camera", 24)}</button>
+        <button type="button" id="callAdd" class="call-btn" aria-label="Add someone to this call" title="Add someone">${CSIcons.icon("plus", 24)}</button>
+        <button type="button" id="callEnd" class="call-btn end" aria-label="End call">${CSIcons.icon("phoneEnd", 26)}</button>
       </div>`;
     document.body.appendChild(el);
     setAvatar($("callAvatar"), call.peer);
@@ -2632,7 +2634,7 @@
       const track = call.local.getAudioTracks()[0];
       if (!track) return;
       track.enabled = !track.enabled;
-      $("callMute").textContent = track.enabled ? "🎤" : "🔇";
+      CSIcons.setIcon($("callMute"), track.enabled ? "mic" : "micOff", 24);
       $("callMute").classList.toggle("off", !track.enabled);
     });
     $("callCam").addEventListener("click", () => {
@@ -2787,8 +2789,8 @@
       <h2>${escapeHtml(name)}</h2>
       <p class="muted">Incoming ${call.media} call…</p>
       <div class="call-controls">
-        <button type="button" class="call-btn end" id="incomingDecline" aria-label="Decline">✕</button>
-        <button type="button" class="call-btn accept" id="incomingAccept" aria-label="Accept">✓</button>
+        <button type="button" class="call-btn end" id="incomingDecline" aria-label="Decline">${CSIcons.icon("phoneEnd", 26)}</button>
+        <button type="button" class="call-btn accept" id="incomingAccept" aria-label="Accept">${CSIcons.icon("phone", 26)}</button>
       </div>`;
     document.body.appendChild(box);
     setAvatar($("incomingAvatar"), peer);
@@ -3739,9 +3741,39 @@
   $("sendBtn").addEventListener("click", () => {
     if ($("messageInput").value.trim()) flySend();
   });
+  // "Press Enter to send" is a per-device setting. Off = Enter adds a new line,
+  // and Ctrl/Cmd + Enter (or the send button) sends.
+  const ENTER_KEY = "chatspace-enter-sends";
+  let enterSends = true;
+  try {
+    enterSends = localStorage.getItem(ENTER_KEY) !== "0";
+  } catch {}
+  function applyEnterSetting() {
+    const t = $("enterSendsToggle");
+    if (t) t.checked = enterSends;
+    const hint = $("composerHint");
+    if (hint)
+      hint.textContent = enterSends
+        ? "Enter to send · Shift + Enter for a new line · Attachments up to 50 MB"
+        : "Enter for a new line · Ctrl + Enter to send · Attachments up to 50 MB";
+  }
+  applyEnterSetting();
+  $("enterSendsToggle")?.addEventListener("change", (e) => {
+    enterSends = e.target.checked;
+    try {
+      localStorage.setItem(ENTER_KEY, enterSends ? "1" : "0");
+    } catch {}
+    applyEnterSetting();
+    toast(
+      enterSends ? "Enter now sends messages." : "Enter now adds a new line.",
+    );
+  });
   $("messageInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && $("messageInput").value.trim())
-      flySend();
+    if (e.key !== "Enter" || e.isComposing) return;
+    const sends = enterSends ? !e.shiftKey : e.ctrlKey || e.metaKey;
+    if (!sends) return;
+    e.preventDefault();
+    if ($("messageInput").value.trim()) flySend();
   });
 
   // ---- GIFs and stickers (KLIPY) ----
@@ -3831,7 +3863,7 @@
       const cell = document.createElement("div");
       cell.className = "gif-cell";
       const isFav = favs.some((f) => f.full === item.full);
-      cell.innerHTML = `<img src="${escapeHtml(item.preview)}" alt="" loading="lazy" /><button type="button" class="gif-star${isFav ? " on" : ""}" aria-label="Save">★</button>`;
+      cell.innerHTML = `<img src="${escapeHtml(item.preview)}" alt="" loading="lazy" /><button type="button" class="gif-star${isFav ? " on" : ""}" aria-label="Save">${CSIcons.icon(isFav ? "starFill" : "star", 16)}</button>`;
       cell
         .querySelector("img")
         .addEventListener("click", () => sendGif(item.full));
@@ -3970,9 +4002,9 @@
         : Math.max(1, Math.round(selectedFile.size / 1024)) + " KB";
     const isImage = window.ChatSpaceEnhance?.canEdit(selectedFile);
     const isVideo = selectedFile.type.startsWith("video/");
-    box.innerHTML = `<span class="att-name">${isVideo ? "🎬" : isImage ? "📷" : "📎"} ${escapeHtml(selectedFile.name)} · ${size}${isVideo ? " · original quality" : ""}</span>
-      ${isImage && originalPicked ? '<button type="button" class="enh-link" data-att="edit">✨ Improve</button>' : ""}
-      <button type="button" class="enh-link" data-att="clear" aria-label="Remove attachment">✕</button>`;
+    box.innerHTML = `<span class="att-name">${CSIcons.icon(isVideo ? "video" : isImage ? "camera" : "paperclip", 14)} ${escapeHtml(selectedFile.name)} · ${size}${isVideo ? " · original quality" : ""}</span>
+      ${isImage && originalPicked ? `<button type="button" class="enh-link" data-att="edit">${CSIcons.icon("sparkles", 14)} Improve</button>` : ""}
+      <button type="button" class="enh-link" data-att="clear" aria-label="Remove attachment">${CSIcons.icon("x", 14)}</button>`;
     box.classList.remove("hidden");
   }
   $("attachmentPreview").addEventListener("click", async (event) => {
@@ -4012,7 +4044,7 @@
     if (mediaRecorder?.state === "recording") {
       mediaRecorder.stop();
       $("recordBtn").classList.remove("recording");
-      $("recordBtn").textContent = "🎙";
+      CSIcons.setIcon($("recordBtn"), "mic", 24);
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
@@ -4048,7 +4080,7 @@
       };
       mediaRecorder.start();
       $("recordBtn").classList.add("recording");
-      $("recordBtn").textContent = "■";
+      CSIcons.setIcon($("recordBtn"), "stop", 24);
       toast("Recording… press the button again to send your voice note.");
     } catch {
       toast("Microphone permission was denied or unavailable.");
@@ -4709,7 +4741,7 @@
     const mineGroup = momentGroups.find((g) => g.userId === currentUser.id);
     const me = document.createElement("div");
     me.className = "moment-tile";
-    me.innerHTML = `<button type="button" class="moment-ring ${mineGroup ? "unseen" : "empty"}" aria-label="${mineGroup ? "View your moments" : "Add a moment"}"><span class="user-avatar">${avatarInner(currentProfile)}</span></button><button type="button" class="moment-add" aria-label="Add a moment">+</button><small>Your moment</small>`;
+    me.innerHTML = `<button type="button" class="moment-ring ${mineGroup ? "unseen" : "empty"}" aria-label="${mineGroup ? "View your moments" : "Add a moment"}"><span class="user-avatar">${avatarInner(currentProfile)}</span></button><button type="button" class="moment-add" aria-label="Add a moment">${CSIcons.icon("plus", 14)}</button><small>Your moment</small>`;
     me.querySelector(".moment-ring").addEventListener("click", () =>
       mineGroup
         ? openMomentViewer(momentGroups.indexOf(mineGroup))
@@ -4920,7 +4952,7 @@
       <div class="mv-head">
         <span class="user-avatar">${avatarInner(group.person)}</span>
         <span class="mv-who"><strong>${escapeHtml(peerName(group.person))}</strong><small id="mvTime"></small></span>
-        <button type="button" class="mv-close" aria-label="Close">✕</button>
+        <button type="button" class="mv-close" aria-label="Close">${CSIcons.icon("x", 20)}</button>
       </div>
       <div class="mv-stage" id="mvStage"></div>
       <button type="button" class="mv-prev" aria-label="Previous"></button>
@@ -4991,7 +5023,8 @@
       const from = r.original_display_name || r.original_username || "someone";
       const tag = document.createElement("div");
       tag.className = "mv-reshare";
-      tag.textContent = "↻ Reshared from " + from;
+      tag.innerHTML =
+        CSIcons.icon("repost", 14) + " Reshared from " + escapeHtml(from);
       el.appendChild(tag);
       if (r.caption) {
         const cap = document.createElement("div");
@@ -5006,11 +5039,15 @@
       const e = eng.get(cur.id) || {};
       const likeBtn = el.querySelector("#mvLike");
       if (likeBtn) {
-        likeBtn.textContent = e.liked_by_me ? "♥" : "♡";
+        likeBtn.innerHTML = CSIcons.icon(
+          e.liked_by_me ? "heartFill" : "heart",
+          24,
+        );
         likeBtn.classList.toggle("on", Boolean(e.liked_by_me));
       }
       const likesBtn = el.querySelector("#mvLikes");
-      if (likesBtn) likesBtn.textContent = `♥ ${Number(e.like_count) || 0}`;
+      if (likesBtn)
+        likesBtn.innerHTML = `${CSIcons.icon("heartFill", 15)} <span>${Number(e.like_count) || 0}</span>`;
       const fwd = el.querySelector("#mvFwd");
       if (fwd) fwd.classList.toggle("hidden", e.allow_forward === false);
       const rp = el.querySelector("#mvRepost");
@@ -5018,8 +5055,9 @@
       paintReshare();
       const fwdToggle = el.querySelector("#mvFwdToggle");
       if (fwdToggle)
-        fwdToggle.textContent =
-          e.allow_forward === false ? "↗ Forwarding off" : "↗ Forwarding on";
+        fwdToggle.innerHTML =
+          CSIcons.icon("forward", 15) +
+          (e.allow_forward === false ? " Forwarding off" : " Forwarding on");
     }
     const close = () => {
       closed = true;
@@ -5070,14 +5108,14 @@
         </div>
         <div class="mv-reply">
           <input id="mvReplyInput" maxlength="500" placeholder="Reply to ${who}…" autocomplete="off" />
-          <button type="button" class="mv-btn mv-send" id="mvSendBtn" aria-label="Send reply">➤</button>
+          <button type="button" class="mv-btn mv-send" id="mvSendBtn" aria-label="Send reply">${CSIcons.icon("send", 20)}</button>
         </div>
         <div class="mv-actions">
-          <button type="button" class="mv-btn" id="mvGifBtn" aria-label="Send a GIF" title="GIF">GIF</button>
-          <button type="button" class="mv-btn" id="mvMicBtn" aria-label="Record a voice note" title="Voice note">🎙</button>
-          <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment" title="Like">♡</button>
-          <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment" title="Forward">↗</button>
-          <button type="button" class="mv-btn" id="mvRepost" aria-label="Reshare to your moments" title="Reshare">↻</button>
+          <button type="button" class="mv-btn" id="mvGifBtn" aria-label="Send a GIF" title="GIFs">${CSIcons.icon("smile", 22)}</button>
+          <button type="button" class="mv-btn" id="mvMicBtn" aria-label="Record a voice note" title="Voice note">${CSIcons.icon("mic", 22)}</button>
+          <button type="button" class="mv-btn mv-like" id="mvLike" aria-label="Like this moment" title="Like">${CSIcons.icon("heart", 24)}</button>
+          <button type="button" class="mv-btn" id="mvFwd" aria-label="Forward this moment" title="Forward">${CSIcons.icon("forward", 22)}</button>
+          <button type="button" class="mv-btn" id="mvRepost" aria-label="Reshare to your moments" title="Reshare">${CSIcons.icon("repost", 22)}</button>
         </div>`;
       const input = foot.querySelector("#mvReplyInput");
       const gifBox = foot.querySelector("#mvGifs");
@@ -5198,7 +5236,7 @@
         recorder.onstop = async () => {
           recStream?.getTracks().forEach((t) => t.stop());
           micBtn.classList.remove("recording");
-          micBtn.textContent = "🎙";
+          CSIcons.setIcon(micBtn, "mic", 22);
           const discard = recDiscard;
           const blob = new Blob(recChunks, {
             type: recorder.mimeType || "audio/webm",
@@ -5218,7 +5256,7 @@
         };
         recorder.start();
         micBtn.classList.add("recording");
-        micBtn.textContent = "■";
+        CSIcons.setIcon(micBtn, "stop", 22);
         toast("Recording… tap ■ to send your voice note.");
         syncPause();
       };
@@ -5233,7 +5271,7 @@
         if (!was) {
           const burst = document.createElement("div");
           burst.className = "mv-heartburst";
-          burst.textContent = "♥";
+          burst.innerHTML = CSIcons.icon("heartFill", 110);
           el.appendChild(burst);
           setTimeout(() => burst.remove(), 800);
         }
@@ -5352,7 +5390,7 @@
       if (isMine) {
         foot.className = "mv-foot";
         el.classList.remove("has-reply");
-        foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><span class="mv-owner-tools"><button type="button" class="ghost-btn" id="mvLikes">♥ 0</button><button type="button" class="ghost-btn" id="mvFwdToggle">↗ Forwarding on</button><button type="button" class="ghost-btn" id="mvFwdOwn">Forward</button><button type="button" class="ghost-btn" id="mvDelete">Delete</button></span>`;
+        foot.innerHTML = `<span id="mvViews">${viewsText(m.view_count)}</span><span class="mv-owner-tools"><button type="button" class="ghost-btn" id="mvLikes">${CSIcons.icon("heartFill", 15)} <span>0</span></button><button type="button" class="ghost-btn" id="mvFwdToggle">${CSIcons.icon("forward", 15)} Forwarding on</button><button type="button" class="ghost-btn" id="mvFwdOwn">${CSIcons.icon("forward", 15)} Forward</button><button type="button" class="ghost-btn" id="mvDelete">${CSIcons.icon("trash", 15)} Delete</button></span>`;
         paintEngagement();
         refreshCounts();
         foot.querySelector("#mvLikes").onclick = () => {
@@ -5575,7 +5613,9 @@
     if (!ref || typeof ref !== "object") return "";
     const mine = ref.owner_id === currentUser.id;
     const who = mine ? "Your moment" : escapeHtml(ref.owner_name || "A moment");
-    const title = ref.fwd ? "↗ Forwarded moment" : "↩ Replied to a moment";
+    const title = ref.fwd
+      ? CSIcons.icon("forward", 12) + " Forwarded moment"
+      : CSIcons.icon("reply", 12) + " Replied to a moment";
     const kindIcon =
       ref.kind === "video" ? "🎬" : ref.kind === "image" ? "📷" : "";
     const okThumb =
@@ -6229,7 +6269,7 @@
       <span class="mb-avatar">${avatar}</span>
       <span class="mb-text"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(body)}</span></span>
       ${bannerCount > 1 ? `<span class="mb-count">${bannerCount}</span>` : ""}
-      <button type="button" class="mb-close" aria-label="Dismiss">✕</button>`;
+      <button type="button" class="mb-close" aria-label="Dismiss">${CSIcons.icon("x", 16)}</button>`;
     bannerEl.querySelector(".mb-close").addEventListener("click", (e) => {
       e.stopPropagation();
       hideBanner();

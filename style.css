@@ -5566,3 +5566,98 @@ label {
     transition: opacity 0.15s ease;
   }
 }
+
+/* =========================================================
+   ICONS (inline SVG set, see icons.js)
+========================================================= */
+.ic {
+  display: block;
+  flex: none;
+  pointer-events: none;
+}
+[data-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.attach-btn,
+.round-btn,
+.send-btn,
+.call-btn,
+.mv-btn,
+.mv-close,
+.ai-icon-btn,
+.ai-send,
+.ai-back,
+.mb-close,
+.moment-add,
+.cancel-reply-btn,
+.gif-star,
+.reaction-picker-trigger,
+.enh-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ghost-btn:has(.ic),
+.ghost-btn:has([data-icon]),
+.primary-btn:has(.ic),
+.enh-chip:has(.ic),
+.dc-tab:has(.ic),
+.message-actions button:has(.ic),
+.nc-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.ghost-btn.full:has(.ic),
+.ghost-btn.full:has([data-icon]),
+.primary-btn.full:has(.ic) {
+  display: flex;
+  width: 100%;
+}
+.message-actions button {
+  gap: 6px;
+}
+.send-btn .ic,
+.ai-send .ic {
+  width: 20px;
+  height: 20px;
+}
+.round-btn .ic {
+  width: 22px;
+  height: 22px;
+}
+.moment-add .ic {
+  width: 14px;
+  height: 14px;
+}
+.gif-star {
+  color: #fff;
+}
+.gif-star.on {
+  color: #facc15;
+}
+.secure-label [data-icon],
+.secure-label .ic {
+  display: inline-block;
+  vertical-align: -2px;
+  margin-right: 2px;
+}
+.mv-reshare .ic,
+.mr-meta small .ic {
+  display: inline-block;
+  vertical-align: -2px;
+}
+.mv-btn.mv-like.on .ic {
+  color: #ff4d6d;
+}
+.mv-btn.recording .ic,
+.round-btn.recording .ic {
+  color: #fff;
+}
+.ai-orb .ic {
+  margin: auto;
+}
