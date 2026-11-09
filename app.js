@@ -2807,7 +2807,7 @@
             body: name,
             tag: "call",
             requireInteraction: true,
-            icon: "/icons/icon-192.png",
+            icon: "/icons/icon-192.png?v=2",
           }),
         )
         .catch(() => {});
@@ -6096,7 +6096,7 @@
     if (document.hidden && canPopup) {
       const opts = {
         body,
-        icon: "/icons/icon-192.png",
+        icon: "/icons/icon-192.png?v=2",
         tag: msg.conversation_id,
       };
       if (navigator.serviceWorker?.ready) {
@@ -6105,8 +6105,137 @@
           .catch(() => new Notification(title, opts));
       } else new Notification(title, opts);
     } else if (!document.hidden && msg.conversation_id !== activeConversation) {
-      toast(title + ": " + body);
+      showMessageBanner(msg, peer, locked);
     }
+  }
+
+  // ---- In-app message pop-up: shows who sent it, their picture and the message ----
+  const senderCache = new Map();
+  async function senderProfile(id) {
+    if (senderCache.has(id)) return senderCache.get(id);
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, username, display_name, avatar_url")
+      .eq("id", id)
+      .maybeSingle();
+    senderCache.set(id, data || null);
+    return data || null;
+  }
+  function messagePreview(msg) {
+    if (msg.deleted_for_everyone) return "This message was deleted";
+    if (msg.view_once) return "👁 View once";
+    if (msg.moment_ref) {
+      if (msg.moment_ref.fwd) return "↗ Forwarded a moment";
+      return msg.content ? "↩ " + msg.content : "↩ Replied to a moment";
+    }
+    if (msg.content) return msg.content;
+    if (msg.attachment_type === "image") return "📷 Photo";
+    if (msg.attachment_type === "video") return "🎬 Video";
+    if (msg.attachment_type === "audio") return "🎤 Voice message";
+    return msg.attachment_url ? "📎 Attachment" : "New message";
+  }
+  let bannerEl = null,
+    bannerTimer = null,
+    bannerConv = null,
+    bannerCount = 0;
+  function hideBanner() {
+    clearTimeout(bannerTimer);
+    const el = bannerEl;
+    bannerEl = null;
+    bannerConv = null;
+    bannerCount = 0;
+    if (!el) return;
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }
+  async function openFromBanner(conversationId) {
+    hideBanner();
+    let peer = lastPeers.find((p) => p.conversationId === conversationId);
+    if (!peer) {
+      await loadChats();
+      peer = lastPeers.find((p) => p.conversationId === conversationId);
+    }
+    if (peer) openConversation(peer, conversationId);
+  }
+  async function showMessageBanner(msg, peer, locked) {
+    let name = "ChatSpace",
+      avatar = `<img src="/icons/logo-mark.png?v=2" alt="" />`,
+      body = "New message";
+    if (!locked) {
+      const from =
+        !peer || peer.isGroup ? await senderProfile(msg.sender_id) : null;
+      const shown = peer || from;
+      if (shown) {
+        name = peerName(shown);
+        avatar = avatarInner(shown);
+      }
+      body = messagePreview(msg);
+      if (peer?.isGroup && from)
+        body = (from.display_name || from.username) + ": " + body;
+    }
+    // The situation may have changed while the sender's profile loaded.
+    if (document.hidden || msg.conversation_id === activeConversation) return;
+    bannerCount =
+      bannerEl && bannerConv === msg.conversation_id ? bannerCount + 1 : 1;
+    bannerConv = msg.conversation_id;
+    if (!bannerEl) {
+      const el = document.createElement("div");
+      el.className = "msg-banner";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.tabIndex = 0;
+      let startX = 0,
+        startY = 0,
+        dy = 0,
+        down = false;
+      el.addEventListener("pointerdown", (e) => {
+        if (e.target.closest(".mb-close")) return;
+        down = true;
+        dy = 0;
+        startX = e.clientX;
+        startY = e.clientY;
+        clearTimeout(bannerTimer);
+        el.setPointerCapture?.(e.pointerId);
+      });
+      el.addEventListener("pointermove", (e) => {
+        if (!down) return;
+        dy = Math.min(0, e.clientY - startY);
+        el.style.transform = `translateY(${dy}px)`;
+        el.style.opacity = String(Math.max(0.3, 1 + dy / 120));
+      });
+      const release = (e, cancelled) => {
+        if (!down) return;
+        down = false;
+        const moved = Math.hypot(e.clientX - startX, e.clientY - startY);
+        el.style.transform = "";
+        el.style.opacity = "";
+        if (!cancelled && dy < -40) return hideBanner();
+        if (!cancelled && moved < 8) return openFromBanner(bannerConv);
+        bannerTimer = setTimeout(hideBanner, 3000);
+      };
+      el.addEventListener("pointerup", (e) => release(e, false));
+      el.addEventListener("pointercancel", (e) => release(e, true));
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") openFromBanner(bannerConv);
+        if (e.key === "Escape") hideBanner();
+      });
+      document.body.appendChild(el);
+      bannerEl = el;
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => el.classList.add("show")),
+      );
+    }
+    bannerEl.innerHTML = `
+      <span class="mb-avatar">${avatar}</span>
+      <span class="mb-text"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(body)}</span></span>
+      ${bannerCount > 1 ? `<span class="mb-count">${bannerCount}</span>` : ""}
+      <button type="button" class="mb-close" aria-label="Dismiss">✕</button>`;
+    bannerEl.querySelector(".mb-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      hideBanner();
+    });
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(hideBanner, 6000);
   }
 
   function applyWallpaper(key) {

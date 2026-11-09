@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v19-logo";
+const CACHE_NAME = "chatspace-v21-newicon";
 const APP_FILES = [
   "/",
   "/index.html",
