@@ -471,8 +471,18 @@
   // =========================================
   // WHAT'S NEW (shown once per person, also in Settings)
   // =========================================
-  const WHATS_NEW_VERSION = "2026-11-d";
+  const WHATS_NEW_VERSION = "2026-11-e";
   const NEW_FEATURES = [
+    [
+      "👈",
+      "Swipe to go back",
+      "Swipe from left to right to go back to the previous screen. The phone back button now works the same way, and a ↓ button jumps you to the latest message.",
+    ],
+    [
+      "📞",
+      "More reliable calls",
+      "Your screen now stays on during a call, and ChatSpace works around phones that reject the microphone settings.",
+    ],
     [
       "🔥",
       "Streaks, scores and badges",
