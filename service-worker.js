@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v22-iconset";
+const CACHE_NAME = "chatspace-v23-nav";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -11,6 +11,8 @@ const APP_FILES = [
   "/icons.js",
   "/discover.js",
   "/discover.css",
+  "/nav.js",
+  "/nav.css",
   "/manifest.json",
   "/icons/logo-mark.png",
   "/icons/favicon-32.png",

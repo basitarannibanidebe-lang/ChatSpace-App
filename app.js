@@ -2524,6 +2524,70 @@
     { urls: "stun:stun.cloudflare.com:3478" },
     { urls: "stun:stun.l.google.com:19302" },
   ];
+
+  // ---- Call trace: remembers the last step of a call. If the phone or browser
+  // closes the app in the middle of a call, the next launch says where it stopped. ----
+  const TRACE_KEY = "cs_call_trace";
+  function callTrace(step) {
+    try {
+      localStorage.setItem(
+        TRACE_KEY,
+        JSON.stringify({
+          step,
+          at: Date.now(),
+          role: call?.role || null,
+          media: call?.media || null,
+        }),
+      );
+    } catch {}
+  }
+  function reportInterruptedCall() {
+    try {
+      const raw = localStorage.getItem(TRACE_KEY);
+      if (!raw) return;
+      localStorage.removeItem(TRACE_KEY);
+      const t = JSON.parse(raw);
+      if (!t || t.step === "ended" || Date.now() - t.at > 10 * 60e3) return;
+      console.warn("Previous call was interrupted:", t, navigator.userAgent);
+      setTimeout(
+        () =>
+          toast(
+            "The app closed during your last " +
+              (t.role === "callee" ? "incoming" : "outgoing") +
+              " call (stopped at: " +
+              t.step +
+              ").",
+          ),
+        1500,
+      );
+    } catch {}
+  }
+  window.addEventListener("error", (e) => {
+    if (call) callTrace("error: " + String(e.message || "").slice(0, 80));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    if (call)
+      callTrace(
+        "rejected: " + String(e.reason?.message || e.reason || "").slice(0, 80),
+      );
+  });
+
+  // Keeps the screen on during a call so the phone doesn't freeze the page.
+  let wakeLock = null;
+  async function holdScreenAwake() {
+    try {
+      wakeLock = (await navigator.wakeLock?.request("screen")) || null;
+    } catch {}
+  }
+  function releaseScreen() {
+    try {
+      wakeLock?.release();
+    } catch {}
+    wakeLock = null;
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && call && !wakeLock) holdScreenAwake();
+  });
   async function getIceServers() {
     if (iceCache && Date.now() < iceCache.exp) {
       iceRelay = true;
@@ -2648,10 +2712,25 @@
     document.getElementById("callStatus") && ($("callStatus").textContent = t);
 
   async function getMedia(media) {
-    return navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: media === "video" ? { facingMode: "user" } : false,
-    });
+    const wantVideo = media === "video";
+    // Some phones reject the fancy audio options, so fall back to the simplest request.
+    const attempts = [
+      {
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: wantVideo ? { facingMode: "user" } : false,
+      },
+      { audio: true, video: wantVideo },
+    ];
+    let lastError;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        lastError = e;
+        if (e?.name === "NotAllowedError" || e?.name === "SecurityError") break;
+      }
+    }
+    throw lastError;
   }
   async function createPeer() {
     const pc = new RTCPeerConnection({ iceServers: await getIceServers() });
@@ -2703,6 +2782,7 @@
   function onCallConnected() {
     if (call.state === "connected") return;
     call.state = "connected";
+    callTrace("connected");
     call.startedAt = Date.now();
     clearTimeout(call.connectTimer);
     clearTimeout(call.ringTimeout);
@@ -2743,16 +2823,22 @@
       state: "ringing",
       pendingIce: [],
     };
+    callTrace("call-started");
     try {
       call.local = await getMedia(media);
     } catch (e) {
       call = null;
+      callTrace("ended");
       return toast(mediaError(e));
     }
+    callTrace("microphone-ready");
+    holdScreenAwake();
     showCallScreen("Calling…");
+    callTrace("call-screen-shown");
     startRing();
     call.ringTimeout = setTimeout(() => endCall("noanswer"), 45000);
     await sendSignal("invite");
+    callTrace("invite-sent");
   }
 
   function onInvite(row) {
@@ -2818,15 +2904,26 @@
     if (!call) return;
     stopRing();
     clearTimeout(call.ringTimeout);
+    callTrace("accept-tapped");
     try {
       call.local = await getMedia(call.media);
     } catch (e) {
       toast(mediaError(e));
       return endCall("declined");
     }
-    showCallScreen("Connecting…");
-    await createPeer();
-    await sendSignal("accept");
+    callTrace("microphone-ready");
+    holdScreenAwake();
+    try {
+      showCallScreen("Connecting…");
+      callTrace("call-screen-shown");
+      await createPeer();
+      callTrace("connection-created");
+      await sendSignal("accept");
+      callTrace("accept-sent");
+    } catch (err) {
+      console.error("Accept call error:", err);
+      endCall("failed");
+    }
   }
 
   async function handleSignal(row) {
@@ -2842,12 +2939,14 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await sendSignal("offer", { type: offer.type, sdp: offer.sdp });
+        callTrace("offer-sent");
       } else if (row.kind === "offer" && call.role === "callee" && call.pc) {
         await call.pc.setRemoteDescription(row.payload);
         await flushIce();
         const answer = await call.pc.createAnswer();
         await call.pc.setLocalDescription(answer);
         await sendSignal("answer", { type: answer.type, sdp: answer.sdp });
+        callTrace("answer-sent");
       } else if (row.kind === "answer" && call.role === "caller" && call.pc) {
         await call.pc.setRemoteDescription(row.payload);
         await flushIce();
@@ -2875,6 +2974,8 @@
     if (!call) return;
     const c = call;
     call = null;
+    callTrace("ended");
+    releaseScreen();
     if (c.state === "connected")
       lastOneToOneEnd = { peerId: c.peerId, at: Date.now() };
     clearTimeout(c.ringTimeout);
@@ -2981,6 +3082,7 @@
 
   function startCallListener() {
     if (callChannel || !currentUser?.id) return;
+    reportInterruptedCall();
     window.CSGroupCall?.init(groupCallApi);
     window.CSGroupCall?.start();
     callChannel = supabase
@@ -6415,6 +6517,13 @@
       contactNames.set(contactId, clean);
       loadChats();
     },
+  };
+
+  // Lets nav.js (swipe back, back button) control screens.
+  window.CSAppNav = {
+    closeChat: () => closeActiveChat(),
+    showView: (view) => showView(view),
+    inCall: () => Boolean(call),
   };
 
   init();

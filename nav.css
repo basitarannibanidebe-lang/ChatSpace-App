@@ -1,0 +1,120 @@
+/* ChatSpace navigation: swipe back, panel transitions, jump-to-latest */
+html,
+body {
+  overscroll-behavior-y: contain;
+  overscroll-behavior-x: none;
+}
+
+.nav-btn {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.15s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+.nav-btn:active {
+  transform: scale(0.9);
+}
+.nav-btn.active svg {
+  animation: csNavPop 0.38s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+@keyframes csNavPop {
+  0% {
+    transform: scale(0.7) translateY(3px);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* Back-swipe arrow */
+.cs-back-hint {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 9999;
+  width: 40px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel2, #171e2e);
+  color: var(--text, #fff);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.15));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-48px, 0, 0);
+}
+.cs-back-hint.ready {
+  background: var(--accent, #7775ff);
+  color: #fff;
+}
+
+/* Jump to latest message */
+.cs-jump {
+  position: fixed;
+  z-index: 12;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.15));
+  background: var(--panel2, #171e2e);
+  color: var(--text, #fff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: translateY(10px) scale(0.9);
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+.cs-jump.show {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+@keyframes csPanelIn {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .profile-panel:not(.hidden) {
+    animation: csPanelIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+  .app-shell.cs-peek .sidebar {
+    display: flex !important;
+    position: fixed;
+    inset: 0 0 62px 0;
+    z-index: 1;
+    width: 100% !important;
+    height: auto !important;
+    background: var(--bg);
+    overflow: hidden;
+    transform: translate3d(var(--cs-peek-x, -24%), 0, 0);
+    filter: brightness(var(--cs-peek-b, 0.75));
+  }
+  .app-shell.cs-peek .nav-rail {
+    display: flex !important;
+    z-index: 1;
+  }
+  .app-shell.cs-peek .chat-panel {
+    display: flex !important;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 5;
+    animation: none !important;
+    box-shadow: -16px 0 40px rgba(0, 0, 0, 0.4);
+  }
+}
