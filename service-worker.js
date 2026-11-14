@@ -1,4 +1,4 @@
-const CACHE_NAME = "chatspace-v24-guard";
+const CACHE_NAME = "chatspace-v25-translate";
 const APP_FILES = [
   "/",
   "/index.html",
@@ -14,6 +14,8 @@ const APP_FILES = [
   "/nav.js",
   "/guard.js",
   "/nav.css",
+  "/translate.js",
+  "/translate.css",
   "/manifest.json",
   "/icons/logo-mark.png",
   "/icons/favicon-32.png",

@@ -133,6 +133,7 @@
     $("signupTab").classList.toggle("active", signup);
     $("authSubmit").textContent = signup ? "Create account" : "Log in";
     $("forgotBtn")?.classList.toggle("hidden", signup);
+    $("langField")?.classList.toggle("hidden", !signup);
     $("password").autocomplete = signup ? "new-password" : "current-password";
     authMessage(
       signup ? "Username: 3–24 letters, numbers, or underscores." : "",
@@ -170,7 +171,9 @@
         const { data, error } = await supabase.auth.signUp({
           email: usernameEmail(username),
           password,
-          options: { data: { username } },
+          options: {
+            data: { username, language: $("signupLanguage")?.value || "" },
+          },
         });
         if (error) throw error;
         if (!data.session || !data.user) {
@@ -184,6 +187,18 @@
           .from("profiles")
           .insert({ id: data.user.id, username });
         if (profileError && profileError.code !== "23505") throw profileError;
+        // Save the language separately, so sign-up still works even if the
+        // language column has not been added in Supabase yet.
+        const chosenLanguage = $("signupLanguage")?.value;
+        if (chosenLanguage) {
+          try {
+            localStorage.setItem("cs:mylang:" + data.user.id, chosenLanguage);
+            await supabase
+              .from("profiles")
+              .update({ language: chosenLanguage })
+              .eq("id", data.user.id);
+          } catch {}
+        }
         currentUser = data.user;
         await loadCurrentProfile();
         showApp();
@@ -240,6 +255,7 @@
     $("myUsername").textContent = peerName(currentProfile);
     setAvatar($("myAvatar"), currentProfile);
     loadAppearance();
+    document.dispatchEvent(new CustomEvent("cs:profile-ready"));
   }
 
   async function getChatPreferences(conversationIds) {
@@ -471,8 +487,13 @@
   // =========================================
   // WHAT'S NEW (shown once per person, also in Settings)
   // =========================================
-  const WHATS_NEW_VERSION = "2026-11-e";
+  const WHATS_NEW_VERSION = "2026-11-f";
   const NEW_FEATURES = [
+    [
+      "🌍",
+      "Languages and translator",
+      "Pick your language when you sign up (or change it any time in Settings or Profile). When someone writes in another language, tap the translate button next to their name and picture to read their messages in your language, or write a reply in theirs.",
+    ],
     [
       "👈",
       "Swipe to go back",
@@ -1258,6 +1279,7 @@
     refreshPeerStatus();
     renderStatsChip();
     window.CSGroupCall?.refreshBanner();
+    document.dispatchEvent(new CustomEvent("cs:chat-open"));
     $("welcomePanel").classList.add("hidden");
     $("messages").classList.remove("hidden");
     $("composer").classList.remove("hidden");
@@ -1292,9 +1314,12 @@
         },
         (payload) => {
           if (payload.new.sender_id !== currentUser.id) {
-            resolveAttachments([payload.new]).then(() =>
-              renderMessage(payload.new),
-            );
+            resolveAttachments([payload.new]).then(() => {
+              renderMessage(payload.new);
+              document.dispatchEvent(
+                new CustomEvent("cs:incoming", { detail: payload.new }),
+              );
+            });
             markRead();
           }
         },
@@ -3339,6 +3364,7 @@
   function closeActiveChat() {
     activePeer = null;
     activeConversation = null;
+    document.dispatchEvent(new CustomEvent("cs:chat-close"));
     $("messages").innerHTML = "";
     $("messages").classList.add("hidden");
     $("composer").classList.add("hidden");
@@ -6513,6 +6539,30 @@
     toast,
     ncShow,
     startConversation,
+    get profile() {
+      return currentProfile;
+    },
+    get activePeer() {
+      return activePeer;
+    },
+    get activeConversation() {
+      return activeConversation;
+    },
+    get messageCache() {
+      return messageCache;
+    },
+    get groupMembers() {
+      return groupMembers;
+    },
+    composerInsert(text) {
+      const el = $("messageInput");
+      if (!el) return;
+      el.value = el.value.trim() ? el.value.trimEnd() + " " + text : text;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 140) + "px";
+      el.focus();
+    },
     async saveContactName(contactId, name) {
       const clean = String(name || "")
         .trim()
